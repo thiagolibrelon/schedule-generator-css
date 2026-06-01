@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Schedule Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SG</div>
+          <div>
+            <strong>Schedule Studio</strong>
+            <span>Timeline generator</span>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="Views">
+          <button class="nav-tab active" data-view="timeline">
+            <i data-lucide="gantt-chart-square"></i>
+            Timeline
+          </button>
+          <button class="nav-tab" data-view="activities">
+            <i data-lucide="table-2"></i>
+            Activities
+          </button>
+          <button class="nav-tab" data-view="milestones">
+            <i data-lucide="milestone"></i>
+            Milestones
+          </button>
+        </nav>
+
+        <div class="sidebar-panel">
+          <label for="projectName">Project</label>
+          <input id="projectName" type="text" />
+          <label for="searchInput">Search</label>
+          <div class="search-field">
+            <i data-lucide="search"></i>
+            <input id="searchInput" type="search" placeholder="Component or activity" />
+          </div>
+          <label for="componentFilter">Component</label>
+          <select id="componentFilter"></select>
+          <label for="statusFilter">Status</label>
+          <select id="statusFilter">
+            <option value="all">All statuses</option>
+            <option>On time</option>
+            <option>Attention point</option>
+            <option>Delayed</option>
+            <option>Concluded</option>
+            <option>Concluded with a delay</option>
+            <option value="blank">No status</option>
+          </select>
+        </div>
+
+        <div class="sidebar-panel compact">
+          <div class="toggle-row">
+            <span>Weeks</span>
+            <label class="switch">
+              <input id="weeksToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Legend</span>
+            <label class="switch">
+              <input id="legendToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Project schedule</p>
+            <h1 id="pageTitle">Schedule Generator</h1>
+          </div>
+          <div class="actions">
+            <button class="icon-button" id="alertsButton" title="Alerts">
+              <i data-lucide="bell-ring"></i>
+              <span id="alertCount">0</span>
+            </button>
+            <button class="secondary-button" id="resetButton">
+              <i data-lucide="rotate-ccw"></i>
+              Reset
+            </button>
+            <button class="secondary-button" id="importJsonButton">
+              <i data-lucide="upload"></i>
+              JSON
+            </button>
+            <input id="importJsonInput" type="file" accept="application/json,.json" hidden />
+            <button class="secondary-button" id="exportJsonButton">
+              <i data-lucide="download"></i>
+              JSON
+            </button>
+            <button class="primary-button" id="exportCsvButton">
+              <i data-lucide="file-down"></i>
+              CSV
+            </button>
+          </div>
+        </header>
+
+        <section class="metrics-grid" id="metricsGrid"></section>
+
+        <section class="view active" id="timelineView">
+          <div class="timeline-toolbar">
+            <div class="legend" id="legend"></div>
+            <div class="zoom-control" aria-label="Timeline zoom">
+              <button class="segmented active" data-zoom="month">Month</button>
+              <button class="segmented" data-zoom="week">Week</button>
+            </div>
+          </div>
+          <div class="timeline-frame">
+            <div class="timeline" id="timeline"></div>
+          </div>
+        </section>
+
+        <section class="view" id="activitiesView">
+          <div class="section-head">
+            <div>
+              <h2>Activities</h2>
+            </div>
+            <button class="primary-button" id="addTaskButton">
+              <i data-lucide="plus"></i>
+              Activity
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table id="tasksTable"></table>
+          </div>
+        </section>
+
+        <section class="view" id="milestonesView">
+          <div class="split">
+            <div>
+              <div class="section-head">
+                <div>
+                  <h2>Project milestones</h2>
+                </div>
+                <button class="primary-button" id="addMilestoneButton">
+                  <i data-lucide="plus"></i>
+                  Milestone
+                </button>
+              </div>
+              <div class="table-wrap">
+                <table id="milestonesTable"></table>
+              </div>
+            </div>
+            <div>
+              <div class="section-head">
+                <div>
+                  <h2>Free milestones</h2>
+                </div>
+                <button class="primary-button" id="addFreeMilestoneButton">
+                  <i data-lucide="plus"></i>
+                  Marker
+                </button>
+              </div>
+              <div class="table-wrap">
+                <table id="freeMilestonesTable"></table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="alertsDialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Schedule health</p>
+          <h2>Alerts</h2>
+        </div>
+        <button class="icon-button" id="closeAlertsButton" title="Close">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div id="alertsList" class="alerts-list"></div>
+    </dialog>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
