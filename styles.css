@@ -833,3 +833,33 @@ dialog::backdrop {
   align-items: center;
   gap: 6px;
 }
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #333;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s ease;
+  z-index: 9999;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.resize-handle.locked {
+  background: #bbb;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ✅ quando passa o mouse na barra */
+.bar:hover .resize-handle.locked {
+  opacity: 1;
+}
