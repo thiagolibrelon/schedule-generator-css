@@ -65,10 +65,19 @@
               <span></span>
             </label>
           </div>
+        
           <div class="toggle-row">
             <span>Legend</span>
             <label class="switch">
               <input id="legendToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+          </div>
+        
+          <div class="toggle-row">
+            <span>Dependencies</span>
+            <label class="switch">
+              <input id="dependenciesToggle" type="checkbox" checked />
               <span></span>
             </label>
           </div>
@@ -112,8 +121,17 @@
           <div class="timeline-toolbar">
             <div class="legend" id="legend"></div>
             <div class="zoom-control" aria-label="Timeline zoom">
-              <button class="segmented active" data-zoom="month">Month</button>
-              <button class="segmented" data-zoom="week">Week</button>
+              <button class="segmented" data-zoom="week">
+                Week
+              </button>
+            
+              <button class="segmented active" data-zoom="month">
+                Month
+              </button>
+            
+              <button class="segmented" data-zoom="quarter">
+                Quarter
+              </button>
             </div>
           </div>
           <div class="timeline-frame">
