@@ -535,60 +535,101 @@ function startMilestoneDrag(event) {
 
 function renderTaskLane(task, min, pxPerDay, width) {
   const meta = statusMeta[task.status || ""] || statusMeta[""];
-  const left = Math.max(0, ((dateValue(task.start) - min) / dayMs) * pxPerDay);
-  const barWidth = Math.max(10, daysBetween(task.start, task.end) * pxPerDay);
-  const progress = Math.max(0, Math.min(1, Number(task.progress || 0)));
 
+  const left = Math.max(
+    0,
+    ((dateValue(task.start) - min) / dayMs) * pxPerDay
+  );
+
+  const barWidth = Math.max(
+    10,
+    daysBetween(task.start, task.end) * pxPerDay
+  );
+
+  const progress = Math.max(
+    0,
+    Math.min(1, Number(task.progress || 0))
+  );
+
+  // ✅ LOCKS
+  const isStartLocked = isTaskFieldLockedByDependency(task.id, "start");
+  const isEndLocked = isTaskFieldLockedByDependency(task.id, "end");
+
+  // ✅ TASK MILESTONE
   const individual = task.milestoneDate
-  ? `
-  <span
-    class="marker draggable-milestone"
-    data-task-id="${task.id}"
-    data-milestone-type="task"
-    title="${escapeHtml(task.milestone || "Milestone")}"
-    style="
-      left:${((dateValue(task.milestoneDate)-min)/dayMs)*pxPerDay}px;
-      --marker:${statusMeta[
-        task.milestoneStatus ||
-        task.status ||
-        ""
-      ].color}
-    "
-  ></span>
-`
-  : "";
+    ? `
+    <span
+      class="marker draggable-milestone"
+      data-task-id="${task.id}"
+      data-milestone-type="task"
+      title="${escapeHtml(task.milestone || "Milestone")}"
+      style="
+        left:${((dateValue(task.milestoneDate) - min) / dayMs) * pxPerDay}px;
+        --marker:${statusMeta[
+          task.milestoneStatus ||
+          task.status ||
+          ""
+        ].color}
+      "
+    ></span>
+    `
+    : "";
 
+  // ✅ FREE MILESTONES
   const freeMarkers = state.freeMilestones
     .filter((item) => item.component === task.component)
     .map((item) => {
-      const offset = ((dateValue(item.date) - min) / dayMs) * pxPerDay;
+      const offset =
+        ((dateValue(item.date) - min) / dayMs) * pxPerDay;
+
       if (offset < 0 || offset > width) return "";
+
       return `<span
-  class="marker free draggable-milestone"
-  data-milestone-id="${item.id}"
-  data-milestone-type="free" title="${escapeHtml(item.name)}" style="left:${offset}px;top:${25 + Number(item.level || 0) * 3}px;--marker:${(statusMeta[item.status] || statusMeta[""]).color}"></span>`;
+        class="marker free draggable-milestone"
+        data-milestone-id="${item.id}"
+        data-milestone-type="free"
+        title="${escapeHtml(item.name)}"
+        style="
+          left:${offset}px;
+          top:${25 + Number(item.level || 0) * 3}px;
+          --marker:${(statusMeta[item.status] || statusMeta[""]).color}
+        "
+      ></span>`;
     })
     .join("");
 
   return `<div class="lane" style="width:${width}px">
-    <div class="bar draggable-bar" data-task-id="${task.id}"
-      style="left:${left}px;width:${barWidth}px;
-      --bar:${meta.color};--bar-soft:${meta.soft};--bar-text:${meta.text}">
+    <div
+      class="bar draggable-bar"
+      data-task-id="${task.id}"
+      style="
+        left:${left}px;
+        width:${barWidth}px;
+        --bar:${meta.color};
+        --bar-soft:${meta.soft};
+        --bar-text:${meta.text}
+      "
+    >
 
+      <!-- ✅ HANDLE ESQUERDO -->
       <span
-        class="resize-handle left"
+        class="resize-handle left ${isStartLocked ? "locked" : ""}"
         data-resize="start"
         data-task-id="${task.id}"
       ></span>
 
-      <div class="bar-progress" style="width:${progress * 100}%"></div>
+      <div
+        class="bar-progress"
+        style="width:${progress * 100}%"
+      ></div>
 
       <div class="bar-label">
         ${escapeHtml(task.description || "")}
       </div>
 
+      <!-- ✅ HANDLE DIREITO -->
       <span
-        class="resize-handle right"
+        class="resize-handle right ${isEndLocked ? "locked" : ""}"
         data-resize="end"
         data-task-id="${task.id}"
       ></span>
@@ -786,16 +827,24 @@ function startResize(event) {
   event.preventDefault();
   const taskId = event.currentTarget.dataset.taskId;
 
-if (hasPredecessor(taskId)) {
-  alert("This activity has a predecessor and cannot be resized manually.");
-  return;
-}
+  const edge = event.currentTarget.dataset.resize;
+  const field = edge === "start" ? "start" : "end";
+  
+  if (isTaskFieldLockedByDependency(taskId, field)) {
+    const dependency = getTaskPredecessorDependency(taskId);
+  
+    alert(
+      `This side is controlled by the ${dependency.type} dependency.`
+    );
+  
+    return;
+  }
 
-resizeState = {
-  taskId,
-  edge: event.currentTarget.dataset.resize,
-  startX: event.clientX,
-};
+  resizeState = {
+    taskId,
+    edge,
+    startX: event.clientX,
+  };
 
   commitState();
 
@@ -805,10 +854,16 @@ function updateField(collection, id, field, value) {
   commitState();
   if (
     collection === "tasks" &&
-    hasPredecessor(id) &&
-    ["start", "end"].includes(field)
+    isTaskFieldLockedByDependency(id, field)
   ) {
-    alert("This activity has a predecessor. Its dates are controlled by dependency rules.");
+    const dependency = getTaskPredecessorDependency(id);
+  
+    const fieldName = field === "start" ? "Start" : "End";
+
+    showToast(
+      `${fieldName} locked by ${dependency.type} dependency`
+    );
+  
     renderAll();
     return;
   }
@@ -819,6 +874,29 @@ function updateField(collection, id, field, value) {
   renderAll();
 }
 
+
+function showToast(message) {
+  const toast = document.createElement("div");
+
+  toast.className = "toast";
+  toast.textContent = message;
+
+  document.body.appendChild(toast);
+
+  // animação de entrada
+  setTimeout(() => {
+    toast.classList.add("show");
+  }, 10);
+
+  // remover depois
+  setTimeout(() => {
+    toast.classList.remove("show");
+
+    setTimeout(() => {
+      toast.remove();
+    }, 300);
+  }, 2500);
+}
 
 function recalculateDependencies(
   sourceTaskId
@@ -941,13 +1019,19 @@ function getTaskPredecessorDependency(taskId) {
   );
 }
 
+function getTaskPredecessorDependencies(taskId) {
+  return state.dependencies.filter(
+    (dep) => dep.successorId === taskId
+  );
+}
+
 function startTaskDrag(event) {
   event.preventDefault();
 
   const taskId = event.currentTarget.dataset.taskId;
 
   if (hasPredecessor(taskId)) {
-    alert("This activity has a predecessor and cannot be moved manually.");
+    alert("This activity has a predecessor. Resize the free side instead.");
     return;
   }
 
@@ -1324,7 +1408,7 @@ function bindEvents() {
         )
       );
   
-      refreshTimelineInteractions();
+      renderTimeline();
     });
   });
   
@@ -1457,6 +1541,25 @@ function refreshTimelineInteractions() {
   initTaskDragging();
   initTaskResize();
   initMilestoneDragging();
+}
+
+function isTaskFieldLockedByDependency(taskId, field) {
+  const dependencies = getTaskPredecessorDependencies(taskId);
+
+  if (!dependencies.length) return false;
+
+  return dependencies.some((dependency) => {
+
+    if (["FS", "SS"].includes(dependency.type)) {
+      return field === "start";
+    }
+
+    if (["FF", "SF"].includes(dependency.type)) {
+      return field === "end";
+    }
+
+    return false;
+  });
 }
 
 function download(filename, content, type) {
