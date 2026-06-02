@@ -723,3 +723,113 @@ dialog::backdrop {
     font-size: 24px;
   }
 }
+.draggable-bar {
+  cursor: grab;
+  user-select: none;
+}
+
+.draggable-bar:active {
+  cursor: grabbing;
+}
+
+.dragging {
+  cursor: grabbing !important;
+}
+
+.dragging * {
+  user-select: none !important;
+}
+
+.draggable-bar {
+  cursor: grab;
+}
+
+.draggable-bar:active {
+  cursor: grabbing;
+}
+
+.dragging,
+.dragging * {
+  user-select: none;
+}
+
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 5;
+}
+
+.resize-handle.left {
+  left: 0;
+  cursor: ew-resize;
+}
+
+.resize-handle.right {
+  right: 0;
+  cursor: ew-resize;
+}
+
+.bar {
+  overflow: visible;
+}
+.draggable-milestone {
+  cursor: grab;
+}
+
+.draggable-milestone:active {
+  cursor: grabbing;
+}
+
+.dependency-line {
+  stroke: #444;
+  stroke-width: 2;
+  fill: none;
+}
+
+.timeline-grid {
+  position: relative;
+}
+
+.dependency-layer {
+  position: absolute;
+  top: 0;
+  left: 260px;
+  width: auto;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 20;
+}
+
+.dependency-line {
+  stroke: #2b2f36;
+  stroke-width: 2;
+  fill: none;
+  marker-end: url(#dependencyArrow);
+  opacity: 0.8;
+}
+
+.dependency-arrow {
+  fill: #2b2f36;
+}
+
+.dependency-label {
+  font-size: 10px;
+  font-weight: 900;
+  fill: #2b2f36;
+  paint-order: stroke;
+  stroke: white;
+  stroke-width: 3px;
+}
+
+.collapsible-component {
+  cursor: pointer;
+}
+
+.task-label.component span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
