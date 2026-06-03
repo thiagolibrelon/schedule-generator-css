@@ -72,6 +72,19 @@ const statusMeta = {
 
 const storageKey = "schedule-studio-state-v1";
 let state = loadState();
+state.tasks.forEach((task) => {
+  task.baselines ??= [];
+
+  if (!task.baselines.length) {
+    const version = "v1";
+
+    task.baselines.push({
+      id: version,
+      start: task.start,
+      end: task.end
+    });
+  }
+});
 state.dependencies ??= [];
 
 if (
@@ -86,6 +99,7 @@ if (
   });
 }
 let zoom = "month";
+let activeBaselineId = "v1";
 const zoomConfig = {
   week: {
     pxPerDay: 9,
@@ -111,6 +125,25 @@ const history = {
 
 function cloneState() {
   return JSON.parse(JSON.stringify(state));
+}
+
+function renderBaselineSelector() {
+  const select = document.getElementById("baselineSelector");
+
+  if (!select) return;
+
+  const baselines = state.tasks[0]?.baselines || [];
+
+  select.innerHTML = baselines
+    .map(
+      (b, index) =>
+        `<option value="${b.id}">
+          Baseline ${index + 1} (${b.start} → ${b.end})
+        </option>`
+    )
+    .join("");
+
+  select.value = activeBaselineId;
 }
 
 function commitState() {
@@ -158,6 +191,31 @@ function loadState() {
     return structuredClone(seed);
   }
 }
+
+
+function captureBaseline() {
+  commitState();
+
+  const version = `v${Date.now()}`;
+
+  state.tasks.forEach((task) => {
+    task.baselines ??= [];
+
+    task.baselines.push({
+      id: version,
+      start: task.start,
+      end: task.end
+    });
+  });
+
+  activeBaselineId = version;
+
+  saveState();
+  renderAll();
+
+  showToast("New baseline version created");
+}
+
 
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
@@ -399,99 +457,6 @@ function isComponentCollapsed(component) {
   return Boolean(collapsedComponents[component]);
 }
 
-function renderTimeline() {
-  const tasks = getFilteredTasks().sort((a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start));
-  const { min, max } = getRange(tasks.length ? tasks : state.tasks);
-  const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
-  const pxPerDay =  zoomConfig[zoom].pxPerDay;
-  const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
-  const months = getMonths(min, max);
-  const todayOffset = ((new Date().setHours(0, 0, 0, 0) - min) / dayMs) * pxPerDay;
-  const monthColumns = months
-    .map((month, index) => {
-      const next = new Date(month);
-      next.setMonth(next.getMonth() + 1);
-      const days = Math.max(1, Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs));
-      return `<div class="month-cell" style="width:${days * pxPerDay}px;grid-column:${index + 1}">${
-        zoom === "quarter"
-          ? quarterLabel(month)
-          : monthLabel(month)
-      }</div>`;
-    })
-    .join("");
-
-  const rows = [];
-  let currentComponent = "";
-  const rowPositions = {};
-  let currentOffset = 0;
-  for (const task of tasks) {
-    if (task.component !== currentComponent) {
-      currentComponent = task.component;
-    
-      const collapsed = isComponentCollapsed(currentComponent);
-      const icon = collapsed ? "▶" : "▼";
-    
-      rows.push(`
-        <div
-          class="task-label component collapsible-component"
-          data-component="${escapeAttr(currentComponent)}"
-        >
-          <span>${icon} ${escapeHtml(currentComponent)}</span>
-        </div>
-        <div
-          class="lane component collapsible-component"
-          data-component="${escapeAttr(currentComponent)}"
-        ></div>
-      `);
-    
-      currentOffset += 38;
-    }
-
-    if (isComponentCollapsed(currentComponent)) {
-      continue;
-    }
-
-    rowPositions[task.id] = {
-      offset: currentOffset,
-    };
-    currentOffset += 44;
-    rows.push(`<div class="task-label" style="padding-left:${14 + Number(task.level || 0) * 12}px">
-      <strong>${escapeHtml(task.description || "Untitled")}</strong>
-      <small>${formatDate(task.start)} - ${formatDate(task.end)}</small>
-    </div>${renderTaskLane(task, min, pxPerDay, timelineWidth)}`);
-  }
-
-  const milestoneBand = `<div class="task-label">Project milestones</div><div class="milestone-band" style="width:${timelineWidth}px">${renderMilestones(min, pxPerDay)}</div>`;
-  const dependencyLines = showDependencies
-  ? renderDependencyLines(
-      tasks,
-      rowPositions,
-      min,
-      pxPerDay,
-      timelineWidth
-    )
-  : "";
-  $("#timeline").innerHTML = 
-  
-  `<div class="timeline-grid">
-    ${dependencyLines}
-    <div class="timeline-corner">${tasks.length} visible activities</div>
-    <div class="months" style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px">${monthColumns}</div>
-    ${milestoneBand}
-    ${rows.join("")}
-  </div>${todayOffset >= 0 && todayOffset <= timelineWidth ? `<div class="today-line" style="left:${260 + todayOffset}px"></div>` : ""}`;
-  $$(".lane").forEach((lane) => {
-    lane.style.width = `${timelineWidth}px`;
-    const gridSize = {
-      week: 63,
-      month: 126,
-      quarter: 252
-    };
-    
-    lane.style.backgroundSize =
-      `${gridSize[zoom]}px 100%`;
-  });
-}
 
 function initMilestoneDragging() {
   document
@@ -555,6 +520,34 @@ function renderTaskLane(task, min, pxPerDay, width) {
   const isStartLocked = isTaskFieldLockedByDependency(task.id, "start");
   const isEndLocked = isTaskFieldLockedByDependency(task.id, "end");
 
+  const activeBaseline = task.baselines?.find(
+    (b) => b.id === activeBaselineId
+  );
+  
+  const baselineBar =
+    activeBaseline &&
+    dateValue(activeBaseline.start) &&
+    dateValue(activeBaseline.end)
+      ? `
+        <div
+          class="baseline-bar"
+          style="
+            left:${
+              ((dateValue(activeBaseline.start) - min) / dayMs) * pxPerDay
+            }px;
+            width:${
+              daysBetween(
+                activeBaseline.start,
+                activeBaseline.end
+              ) * pxPerDay
+            }px;
+          "
+        ></div>
+      `
+      : "";
+  
+
+
   // ✅ TASK MILESTONE
   const individual = task.milestoneDate
     ? `
@@ -598,7 +591,8 @@ function renderTaskLane(task, min, pxPerDay, width) {
     })
     .join("");
 
-  return `<div class="lane" style="width:${width}px">
+    return `<div class="lane" style="width:${width}px">
+    ${baselineBar}
     <div
       class="bar draggable-bar"
       data-task-id="${task.id}"
@@ -638,6 +632,27 @@ function renderTaskLane(task, min, pxPerDay, width) {
 
     ${individual}${freeMarkers}
   </div>`;
+}
+
+function getSnapDays() {
+  const snapByZoom = {
+    week: 7,
+    month: 1,
+    quarter: 30,
+  };
+
+  return snapByZoom[zoom] || 1;
+}
+
+function getSnappedDeltaDays(deltaPx, pxPerDay) {
+  const rawDays = Math.round(deltaPx / pxPerDay);
+  const snapDays = getSnapDays();
+
+  if (Math.abs(rawDays) < snapDays) {
+    return 0;
+  }
+
+  return Math.trunc(rawDays / snapDays) * snapDays;
 }
 
 function renderMilestones(min, pxPerDay) {
@@ -803,6 +818,7 @@ function renderAll() {
   renderFilters();
   renderMetrics();
   renderLegend();
+  renderBaselineSelector();
   refreshTimelineInteractions();
   renderTasksTable();
   renderMilestoneTables();
@@ -1079,8 +1095,8 @@ document.addEventListener("mousemove", (event) => {
       event.clientX -
       milestoneDragState.startX;
   
-    const deltaDays =
-      Math.round(deltaPx / pxPerDay);
+      const deltaDays =
+      getSnappedDeltaDays(deltaPx, pxPerDay);
   
     if (!deltaDays) return;
   
@@ -1166,8 +1182,7 @@ document.addEventListener("mousemove", (event) => {
       }
     }
   
-    milestoneDragState.startX =
-      event.clientX;
+    milestoneDragState.startX += deltaDays * pxPerDay;
   
     saveState();
   
@@ -1185,8 +1200,8 @@ document.addEventListener("mousemove", (event) => {
   const deltaPx =
     event.clientX - dragState.startX;
 
-  const deltaDays =
-    Math.round(deltaPx / pxPerDay);
+    const deltaDays =
+    getSnappedDeltaDays(deltaPx, pxPerDay);
 
   if (!deltaDays) return;
 
@@ -1199,7 +1214,7 @@ document.addEventListener("mousemove", (event) => {
 
   shiftTask(task, deltaDays);
 
-  dragState.startX = event.clientX;
+  dragState.startX += deltaDays * pxPerDay;
 
   saveState();
 
@@ -1237,8 +1252,8 @@ document.addEventListener(
     const deltaPx =
       event.clientX - resizeState.startX;
 
-    const deltaDays =
-      Math.round(deltaPx / pxPerDay);
+      const deltaDays =
+      getSnappedDeltaDays(deltaPx, pxPerDay);
 
     if (!deltaDays) return;
 
@@ -1278,7 +1293,7 @@ document.addEventListener(
       recalculateDependencies(task.id);
     }
 
-    resizeState.startX = event.clientX;
+    resizeState.startX += deltaDays * pxPerDay;
 
     saveState();
     refreshTimelineInteractions();
@@ -1341,6 +1356,22 @@ function bindEvents() {
     initTaskResize();
     initMilestoneDragging();
   });
+
+  const baselineSelect = document.getElementById("baselineSelector");
+
+if (baselineSelect) {
+  baselineSelect.addEventListener("change", (event) => {
+    activeBaselineId = event.target.value;
+    renderAll();
+  });
+}
+
+
+  $("#captureBaselineButton")
+  .addEventListener(
+    "click",
+    captureBaseline
+  );
 
   $("#dependenciesToggle").addEventListener("change", (event) => {
     showDependencies = event.target.checked;
@@ -1408,7 +1439,7 @@ function bindEvents() {
         )
       );
   
-      renderTimeline();
+      refreshTimelineInteractions();
     });
   });
   
@@ -1534,6 +1565,100 @@ function bindEvents() {
 function toCsv(rows) {
   const headers = ["component", "description", "start", "end", "status", "progress", "milestone", "milestoneDate", "level"];
   return [headers.join(","), ...rows.map((row) => headers.map((key) => `"${String(row[key] ?? "").replaceAll('"', '""')}"`).join(","))].join("\n");
+}
+
+function renderTimeline() {
+  const tasks = getFilteredTasks().sort((a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start));
+  const { min, max } = getRange(tasks.length ? tasks : state.tasks);
+  const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
+  const pxPerDay =  zoomConfig[zoom].pxPerDay;
+  const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
+  const months = getMonths(min, max);
+  const todayOffset = ((new Date().setHours(0, 0, 0, 0) - min) / dayMs) * pxPerDay;
+  const monthColumns = months
+    .map((month, index) => {
+      const next = new Date(month);
+      next.setMonth(next.getMonth() + 1);
+      const days = Math.max(1, Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs));
+      return `<div class="month-cell" style="width:${days * pxPerDay}px;grid-column:${index + 1}">${
+        zoom === "quarter"
+          ? quarterLabel(month)
+          : monthLabel(month)
+      }</div>`;
+    })
+    .join("");
+
+  const rows = [];
+  let currentComponent = "";
+  const rowPositions = {};
+  let currentOffset = 0;
+  for (const task of tasks) {
+    if (task.component !== currentComponent) {
+      currentComponent = task.component;
+    
+      const collapsed = isComponentCollapsed(currentComponent);
+      const icon = collapsed ? "▶" : "▼";
+    
+      rows.push(`
+        <div
+          class="task-label component collapsible-component"
+          data-component="${escapeAttr(currentComponent)}"
+        >
+          <span>${icon} ${escapeHtml(currentComponent)}</span>
+        </div>
+        <div
+          class="lane component collapsible-component"
+          data-component="${escapeAttr(currentComponent)}"
+        ></div>
+      `);
+    
+      currentOffset += 38;
+    }
+
+    if (isComponentCollapsed(currentComponent)) {
+      continue;
+    }
+
+    rowPositions[task.id] = {
+      offset: currentOffset,
+    };
+    currentOffset += 44;
+    rows.push(`<div class="task-label" style="padding-left:${14 + Number(task.level || 0) * 12}px">
+      <strong>${escapeHtml(task.description || "Untitled")}</strong>
+      <small>${formatDate(task.start)} - ${formatDate(task.end)}</small>
+    </div>${renderTaskLane(task, min, pxPerDay, timelineWidth)}`);
+  }
+
+  const milestoneBand = `<div class="task-label">Project milestones</div><div class="milestone-band" style="width:${timelineWidth}px">${renderMilestones(min, pxPerDay)}</div>`;
+  const dependencyLines = showDependencies
+  ? renderDependencyLines(
+      tasks,
+      rowPositions,
+      min,
+      pxPerDay,
+      timelineWidth
+    )
+  : "";
+  $("#timeline").innerHTML = 
+  
+  `<div class="timeline-grid">
+    ${dependencyLines}
+    <div class="timeline-corner">${tasks.length} visible activities</div>
+    <div class="months" style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px">${monthColumns}</div>
+    ${milestoneBand}
+    ${rows.join("")}
+  </div>${todayOffset >= 0 && todayOffset <= timelineWidth ? `<div class="today-line" style="left:${260 + todayOffset}px"></div>` : ""}`;
+  $$(".lane").forEach((lane) => {
+    lane.style.width = `${timelineWidth}px`;
+    const gridSize = {
+      week: 63,
+      month: 126,
+      quarter: 252
+    };
+    
+    lane.style.backgroundSize =
+      `${gridSize[zoom]}px 100%`;
+  });
 }
 
 function refreshTimelineInteractions() {
