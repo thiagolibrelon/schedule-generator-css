@@ -863,3 +863,41 @@ dialog::backdrop {
 .bar:hover .resize-handle.locked {
   opacity: 1;
 }
+
+.baseline-bar {
+  position: absolute;
+  top: -8px;
+
+  height: 6px;
+
+  border-radius: 999px;
+
+  background: repeating-linear-gradient(
+    45deg,
+    #999,
+    #999 4px,
+    #bbb 4px,
+    #bbb 8px
+  );
+
+  opacity: 0.7;
+  z-index: 0;
+}
+
+.baseline-control {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.baseline-control label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.baseline-control {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
