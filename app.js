@@ -99,6 +99,8 @@ if (
   });
 }
 let zoom = "month";
+let compactZoom = "month";
+let compactLabelMode = "weeks";
 let activeBaselineId = "v1";
 const zoomConfig = {
   week: {
@@ -634,19 +636,19 @@ function renderTaskLane(task, min, pxPerDay, width) {
   </div>`;
 }
 
-function getSnapDays() {
+function getSnapDays(targetZoom = zoom) {
   const snapByZoom = {
     week: 7,
     month: 1,
     quarter: 30,
   };
 
-  return snapByZoom[zoom] || 1;
+  return snapByZoom[targetZoom] || 1;
 }
 
-function getSnappedDeltaDays(deltaPx, pxPerDay) {
+function getSnappedDeltaDays(deltaPx, pxPerDay, targetZoom = zoom) {
   const rawDays = Math.round(deltaPx / pxPerDay);
-  const snapDays = getSnapDays();
+  const snapDays = getSnapDays(targetZoom);
 
   if (Math.abs(rawDays) < snapDays) {
     return 0;
@@ -812,6 +814,283 @@ function renderAlerts() {
     : `<div class="empty-state">No open alerts.</div>`;
 }
 
+function getWeekNumber(date) {
+  const current = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNumber = current.getUTCDay() || 7;
+
+  current.setUTCDate(current.getUTCDate() + 4 - dayNumber);
+
+  const yearStart = new Date(Date.UTC(current.getUTCFullYear(), 0, 1));
+
+  return Math.ceil((((current - yearStart) / dayMs) + 1) / 7);
+}
+
+function renderCompactWeeksHeader(min, max, pxPerDay, timelineWidth) {
+  const showWeeks = $("#weeksToggle")?.checked;
+
+  if (!showWeeks) return "";
+
+  const weeks = [];
+  const current = new Date(min);
+
+  while (current <= max) {
+    const weekStart = new Date(current);
+    const left = ((weekStart - min) / dayMs) * pxPerDay;
+
+    weeks.push(`
+      <div
+        class="compact-week-cell"
+        style="left:${left}px;width:${7 * pxPerDay}px"
+      >
+        ${getWeekNumber(weekStart)}
+      </div>
+    `);
+
+    current.setDate(current.getDate() + 7);
+  }
+
+  return `
+    <div class="timeline-corner compact-week-corner">Weeks</div>
+    <div class="compact-weeks-row" style="width:${timelineWidth}px">
+      ${weeks.join("")}
+    </div>
+  `;
+}
+
+function renderCompactMonthBands(months, min, max, pxPerDay) {
+  return months
+    .map((month, index) => {
+      const next = new Date(month);
+      next.setMonth(next.getMonth() + 1);
+
+      const left = ((Math.max(month, min) - min) / dayMs) * pxPerDay;
+      const width =
+        Math.max(
+          1,
+          Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs)
+        ) * pxPerDay;
+
+      return `
+        <div
+          class="compact-month-band ${index % 2 ? "alt" : ""}"
+          style="left:${left}px;width:${width}px"
+        ></div>
+      `;
+    })
+    .join("");
+}
+
+function renderCompactTimeline() {
+  const tasks = getFilteredTasks().sort(
+    (a, b) =>
+      a.component.localeCompare(b.component) ||
+      dateValue(a.start) - dateValue(b.start)
+  );
+
+  const { min, max } = getRange(tasks.length ? tasks : state.tasks);
+  const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
+  const pxPerDay = zoomConfig[compactZoom].pxPerDay;
+  const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
+  const months = getMonths(min, max);
+
+  const weeksHeader = renderCompactWeeksHeader(
+    min,
+    max,
+    pxPerDay,
+    timelineWidth
+  );
+  
+  const monthBands = renderCompactMonthBands(
+    months,
+    min,
+    max,
+    pxPerDay
+  );
+
+  const monthColumns = months
+    .map((month, index) => {
+      const next = new Date(month);
+      next.setMonth(next.getMonth() + 1);
+
+      const days = Math.max(
+        1,
+        Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs)
+      );
+
+      return `
+        <div
+          class="month-cell"
+          style="width:${days * pxPerDay}px;grid-column:${index + 1}"
+        >
+          ${compactZoom === "quarter" ? quarterLabel(month) : monthLabel(month)}
+        </div>
+      `;
+    })
+    .join("");
+
+  const grouped = new Map();
+
+  tasks.forEach((task) => {
+    if (!grouped.has(task.component)) {
+      grouped.set(task.component, []);
+    }
+
+    grouped.get(task.component).push(task);
+  });
+
+  const rows = [];
+
+  for (const [component, componentTasks] of grouped.entries()) {
+    const lanes = packCompactTasks(componentTasks);
+
+    rows.push(`
+      <div class="compact-component-label" style="height:${lanes.length * 32 + 20}px">
+        <strong>${escapeHtml(component)}</strong>
+      </div>
+
+      <div
+        class="compact-component-lane"
+        style="width:${timelineWidth}px;height:${lanes.length * 32 + 20}px"
+      >
+      ${monthBands}
+        ${lanes
+          .flatMap((lane, laneIndex) =>
+            lane.map((task) => renderCompactBar(task, min, pxPerDay, laneIndex))
+          )
+          .join("")}
+      </div>
+    `);
+  }
+
+  $("#compactTimeline").innerHTML = `
+    <div class="timeline-grid compact-grid">
+      <div class="timeline-corner">${tasks.length} activities</div>
+
+      <div
+        class="months"
+        style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px"
+      >
+        ${monthColumns}
+      </div>
+
+      ${weeksHeader}
+      ${rows.join("")}
+    </div>
+  `;
+//aqui
+  $$(".compact-component-lane").forEach((lane) => {
+    lane.style.backgroundSize =
+      `${compactZoom === "week" ? 63 : compactZoom === "quarter" ? 252 : 126}px 100%`;
+  });
+  initCompactDragging();
+}
+
+async function exportCompactTimelinePng() {
+
+  const element =
+    document.getElementById(
+      "compactTimeline"
+    );
+
+  if (!element) return;
+
+  const canvas =
+    await html2canvas(element, {
+      backgroundColor: "#ffffff",
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
+
+  const link =
+    document.createElement("a");
+
+  link.download =
+    `timeline-compact-${
+      new Date()
+        .toISOString()
+        .slice(0,10)
+    }.png`;
+
+  link.href =
+    canvas.toDataURL(
+      "image/png"
+    );
+
+  link.click();
+}
+
+function packCompactTasks(tasks) {
+  const lanes = [];
+
+  const ordered = [...tasks].sort(
+    (a, b) => dateValue(a.start) - dateValue(b.start)
+  );
+
+  for (const task of ordered) {
+    let placed = false;
+
+    for (const lane of lanes) {
+      const last = lane[lane.length - 1];
+
+      if (dateValue(task.start) > dateValue(last.end)) {
+        lane.push(task);
+        placed = true;
+        break;
+      }
+    }
+
+    if (!placed) {
+      lanes.push([task]);
+    }
+  }
+
+  return lanes;
+}
+
+function compactTaskLabel(task) {
+  const durationDays = daysBetween(task.start, task.end);
+  const durationWeeks = Math.max(1, Math.ceil(durationDays / 7));
+
+  if (compactLabelMode === "days") {
+    return `${task.description || ""} · ${durationDays}d`;
+  }
+
+  if (compactLabelMode === "dates") {
+    return `${task.description || ""} · ${formatDate(task.start)} - ${formatDate(task.end)}`;
+  }
+
+  return `${task.description || ""} · ${durationWeeks}w`;
+}
+
+function renderCompactBar(task, min, pxPerDay, laneIndex) {
+  const meta = statusMeta[task.status || ""] || statusMeta[""];
+
+  const left =
+    ((dateValue(task.start) - min) / dayMs) * pxPerDay;
+
+  const width =
+    Math.max(28, daysBetween(task.start, task.end) * pxPerDay);
+
+    return `
+    <div
+      class="compact-bar compact-draggable-bar"
+      data-task-id="${task.id}"
+      title="${escapeAttr(task.description)} · ${formatDate(task.start)} - ${formatDate(task.end)}"
+      style="
+        left:${left}px;
+        top:${10 + laneIndex * 32}px;
+        width:${width}px;
+        --bar:${meta.color};
+        --bar-soft:${meta.soft};
+        --bar-text:${meta.text};
+      "
+    >
+      ${escapeHtml(compactTaskLabel(task))}
+    </div>
+  `;
+}
+
 function renderAll() {
   $("#projectName").value = state.projectName;
   $("#pageTitle").textContent = state.projectName || "Schedule Generator";
@@ -820,6 +1099,7 @@ function renderAll() {
   renderLegend();
   renderBaselineSelector();
   refreshTimelineInteractions();
+  renderCompactTimeline();
   renderTasksTable();
   renderMilestoneTables();
   renderAlerts();
@@ -1041,6 +1321,32 @@ function getTaskPredecessorDependencies(taskId) {
   );
 }
 
+function initCompactDragging() {
+  document.querySelectorAll(".compact-draggable-bar").forEach((bar) => {
+    bar.onmousedown = startCompactDrag;
+  });
+}
+
+function startCompactDrag(event) {
+  event.preventDefault();
+
+  const taskId = event.currentTarget.dataset.taskId;
+
+  if (hasPredecessor(taskId)) {
+    showToast("This activity has a predecessor. Move the predecessor instead.");
+    return;
+  }
+
+  compactDragState = {
+    taskId,
+    startX: event.clientX,
+  };
+
+  commitState();
+
+  document.body.classList.add("dragging");
+}
+
 function startTaskDrag(event) {
   event.preventDefault();
 
@@ -1086,6 +1392,34 @@ function shiftTask(task, days) {
 }
 
 document.addEventListener("mousemove", (event) => {
+  if (compactDragState) {
+    const pxPerDay = zoomConfig[compactZoom].pxPerDay;
+  
+    const deltaPx =
+      event.clientX - compactDragState.startX;
+  
+    const deltaDays =
+      getSnappedDeltaDays(deltaPx, pxPerDay, compactZoom);
+  
+    if (!deltaDays) return;
+  
+    const task = state.tasks.find(
+      (item) => item.id === compactDragState.taskId
+    );
+  
+    if (!task) return;
+  
+    shiftTask(task, deltaDays);
+  
+    compactDragState.startX += deltaDays * pxPerDay;
+  
+    saveState();
+  
+    renderCompactTimeline();
+  
+    return;
+  }
+
   if (milestoneDragState) {
 
     const pxPerDay =
@@ -1225,13 +1559,15 @@ document.addEventListener("mousemove", (event) => {
 
 document.addEventListener("mouseup", () => {
   const wasInteracting =
-    dragState ||
-    resizeState ||
-    milestoneDragState;
+  dragState ||
+  resizeState ||
+  milestoneDragState ||
+  compactDragState;
 
   dragState = null;
   resizeState = null;
   milestoneDragState = null;
+  compactDragState = null;
 
   document.body.classList.remove("dragging");
 
@@ -1366,6 +1702,45 @@ if (baselineSelect) {
   });
 }
 
+$("#weeksToggle").addEventListener("change", () => {
+  renderCompactTimeline();
+});
+
+$("#exportCompactPngButton")
+  ?.addEventListener(
+    "click",
+    exportCompactTimelinePng
+  );
+
+$$(".compact-label").forEach((button) => {
+  button.addEventListener("click", () => {
+    compactLabelMode = button.dataset.compactLabel;
+
+    $$(".compact-label").forEach((item) =>
+      item.classList.toggle(
+        "active",
+        item.dataset.compactLabel === compactLabelMode
+      )
+    );
+
+    renderCompactTimeline();
+  });
+});
+
+$$(".compact-zoom").forEach((button) => {
+  button.addEventListener("click", () => {
+    compactZoom = button.dataset.compactZoom;
+
+    $$(".compact-zoom").forEach((item) =>
+      item.classList.toggle(
+        "active",
+        item.dataset.compactZoom === compactZoom
+      )
+    );
+
+    renderCompactTimeline();
+  });
+});
 
   $("#captureBaselineButton")
   .addEventListener(
@@ -1424,15 +1799,15 @@ if (baselineSelect) {
     $("#pageTitle").textContent = state.projectName;
   });
 
-  ["searchInput", "componentFilter", "statusFilter", "weeksToggle", "legendToggle", "dependenciesToggle"].forEach((id) => {
+  ["searchInput", "componentFilter", "statusFilter", "legendToggle"].forEach((id) => {
     $(`#${id}`).addEventListener("input", renderAll);
   });
 
-  $$(".segmented").forEach((button) => {
+  $$(".segmented[data-zoom]").forEach((button) => {
     button.addEventListener("click", () => {
       zoom = button.dataset.zoom;
   
-      $$(".segmented").forEach((item) =>
+      $$(".segmented[data-zoom]").forEach((item) =>
         item.classList.toggle(
           "active",
           item.dataset.zoom === zoom
@@ -1556,10 +1931,41 @@ if (baselineSelect) {
     }
   });
 
-  $("#exportJsonButton").addEventListener("click", () => download("schedule-studio.json", JSON.stringify(state, null, 2), "application/json"));
-  $("#exportCsvButton").addEventListener("click", () => download("schedule-activities.csv", toCsv(state.tasks), "text/csv"));
-  $("#alertsButton").addEventListener("click", () => $("#alertsDialog").showModal());
-  $("#closeAlertsButton").addEventListener("click", () => $("#alertsDialog").close());
+  $("#exportJsonButton").addEventListener(
+    "click",
+    () =>
+      download(
+        "schedule-studio.json",
+        JSON.stringify(state, null, 2),
+        "application/json"
+      )
+  );
+  
+  $("#exportCsvButton").addEventListener(
+    "click",
+    () =>
+      download(
+        "schedule-activities.csv",
+        toCsv(state.tasks),
+        "text/csv"
+      )
+  );
+  
+  $("#exportCompactPngButton")
+    ?.addEventListener(
+      "click",
+      exportCompactTimelinePng
+    );
+  
+  $("#alertsButton").addEventListener(
+    "click",
+    () => $("#alertsDialog").showModal()
+  );
+  
+  $("#closeAlertsButton").addEventListener(
+    "click",
+    () => $("#alertsDialog").close()
+  );
 }
 
 function toCsv(rows) {
@@ -1640,13 +2046,14 @@ function renderTimeline() {
     )
   : "";
   $("#timeline").innerHTML = 
-  
+  //aqui
   `<div class="timeline-grid">
     ${dependencyLines}
     <div class="timeline-corner">${tasks.length} visible activities</div>
     <div class="months" style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px">${monthColumns}</div>
     ${milestoneBand}
     ${rows.join("")}
+
   </div>${todayOffset >= 0 && todayOffset <= timelineWidth ? `<div class="today-line" style="left:${260 + todayOffset}px"></div>` : ""}`;
   $$(".lane").forEach((lane) => {
     lane.style.width = `${timelineWidth}px`;
@@ -1697,6 +2104,59 @@ function download(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
+async function exportCompactTimelinePng() {
+
+  const element =
+    document.getElementById(
+      "presentationExportArea"
+    );
+
+  if (!element) {
+    showToast(
+      "Presentation area not found"
+    );
+    return;
+  }
+
+  showToast(
+    "Generating image..."
+  );
+
+  const canvas =
+    await html2canvas(
+      element,
+      {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        scrollX: 0,
+        scrollY: 0
+      }
+    );
+
+  const link =
+    document.createElement("a");
+
+  link.download =
+    `${state.projectName || "timeline"}-${
+      new Date()
+        .toISOString()
+        .slice(0, 10)
+    }.png`;
+
+  link.href =
+    canvas.toDataURL(
+      "image/png"
+    );
+
+  link.click();
+
+  showToast(
+    "PNG exported"
+  );
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1711,8 +2171,7 @@ function escapeAttr(value) {
 let dragState = null;
 let resizeState = null;
 let milestoneDragState = null;
-
-
+let compactDragState = null;
 
 
 bindEvents();
