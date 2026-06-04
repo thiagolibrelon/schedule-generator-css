@@ -25,6 +25,10 @@
             <i data-lucide="gantt-chart-square"></i>
             Timeline
           </button>
+          <button class="nav-tab" data-view="compact">
+            <i data-lucide="panel-top"></i>
+            Timeline Compact
+          </button>
           <button class="nav-tab" data-view="activities">
             <i data-lucide="table-2"></i>
             Activities
@@ -116,6 +120,13 @@
               <i data-lucide="download"></i>
               JSON
             </button>
+            <button
+  class="secondary-button"
+  id="exportCompactPngButton"
+>
+  <i data-lucide="image"></i>
+  PNG
+</button>
             <button class="primary-button" id="exportCsvButton">
               <i data-lucide="file-down"></i>
               CSV
@@ -128,6 +139,8 @@
         <section class="view active" id="timelineView">
           <div class="timeline-toolbar">
             <div class="legend" id="legend"></div>
+
+
             <div class="zoom-control" aria-label="Timeline zoom">
               <button class="segmented" data-zoom="week">
                 Week
@@ -194,6 +207,59 @@
             </div>
           </div>
         </section>
+
+
+        <section class="view" id="compactView">
+          <div class="timeline-toolbar">
+            <div>
+              <p class="eyebrow">Presentation view</p>
+              <h2>Timeline Compact</h2>
+            </div>
+        
+            <div class="zoom-control" aria-label="Compact timeline zoom">
+              <button class="segmented compact-zoom" data-compact-zoom="week">
+                Week
+              </button>
+        
+              <button class="segmented compact-zoom active" data-compact-zoom="month">
+                Month
+              </button>
+        
+              <button class="segmented compact-zoom" data-compact-zoom="quarter">
+                Quarter
+              </button>
+            </div>
+            <div class="compact-control-group">
+              <span class="compact-control-title">Label</span>
+            
+              <div class="zoom-control" aria-label="Compact label mode">
+                <button class="segmented compact-label active" data-compact-label="weeks">
+                  W
+                </button>
+            
+                <button class="segmented compact-label" data-compact-label="days">
+                  D
+                </button>
+            
+                <button class="segmented compact-label" data-compact-label="dates">
+                  Period
+                </button>
+              </div>
+            </div>
+
+          </div>
+        
+          <div id="presentationExportArea">
+            <div class="timeline-frame">
+              <div
+                class="timeline compact-timeline"
+                id="compactTimeline"
+              ></div>
+            </div>
+          </div>
+        </section>
+        
+
       </main>
     </div>
 
@@ -211,6 +277,7 @@
     </dialog>
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
