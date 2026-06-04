@@ -901,3 +901,120 @@ dialog::backdrop {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+
+.compact-grid {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+}
+
+.compact-component-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--charcoal);
+  color: #fff;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.compact-component-lane {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+  background-image: linear-gradient(
+    to right,
+    rgba(32, 33, 36, 0.08) 1px,
+    transparent 1px
+  );
+}
+
+.compact-bar {
+  position: absolute;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--bar) 72%, #000);
+  background: var(--bar-soft);
+  color: var(--bar-text);
+  box-shadow: 0 2px 8px rgba(32, 33, 36, 0.12);
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-weeks-row {
+  position: relative;
+  min-height: 28px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.compact-week-corner {
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.compact-week-cell {
+  position: absolute;
+  top: 0;
+  height: 28px;
+  border-left: 1px solid rgba(32, 33, 36, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.compact-month-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.compact-month-band.alt {
+  background: rgba(32, 33, 36, 0.045);
+}
+
+.compact-bar {
+  z-index: 2;
+}
+
+.compact-component-lane {
+  overflow: hidden;
+}
+
+.compact-control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compact-control-title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.compact-draggable-bar {
+  cursor: grab;
+}
+
+.compact-draggable-bar:active {
+  cursor: grabbing;
+}
+
+#presentationExportArea {
+  background: #ffffff;
+  padding: 12px;
+}
