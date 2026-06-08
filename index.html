@@ -14,32 +14,53 @@
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">SG</div>
-          <div>
+          <div class="brand-text">
             <strong>Schedule Studio</strong>
             <span>Timeline generator</span>
           </div>
         </div>
 
+        <button class="sidebar-toggle" id="toggleSidebarButton" title="Recolher menu">
+          <i data-lucide="panel-left-close" class="icon-collapse"></i>
+          <i data-lucide="panel-left-open" class="icon-expand"></i>
+        </button>
+
         <nav class="nav-tabs" aria-label="Views">
-          <button class="nav-tab active" data-view="timeline">
+          <!-- FIX: active adicionado ao Dashboard (era ausente) -->
+          <button class="nav-tab active" data-view="dashboard" title="Dashboard">
+            <i data-lucide="layout-dashboard"></i>
+            <span class="nav-label">Dashboard</span>
+          </button>
+          <button class="nav-tab" data-view="timeline" title="Timeline">
             <i data-lucide="gantt-chart-square"></i>
-            Timeline
+            <span class="nav-label">Timeline</span>
           </button>
-          <button class="nav-tab" data-view="compact">
+          <button class="nav-tab" data-view="compact" title="Timeline Compact">
             <i data-lucide="panel-top"></i>
-            Timeline Compact
+            <span class="nav-label">Timeline Compact</span>
           </button>
-          <button class="nav-tab" data-view="activities">
+          <button class="nav-tab" data-view="activities" title="Activities">
             <i data-lucide="table-2"></i>
-            Activities
+            <span class="nav-label">Activities</span>
           </button>
-          <button class="nav-tab" data-view="milestones">
+          <button class="nav-tab" data-view="milestones" title="Milestones">
             <i data-lucide="milestone"></i>
-            Milestones
+            <span class="nav-label">Milestones</span>
+          </button>
+          <button class="nav-tab" data-view="team" title="Team">
+            <i data-lucide="users"></i>
+            <span class="nav-label">Team</span>
+          </button>
+
+          <div class="nav-spacer"></div>
+
+          <button class="nav-tab" data-view="settings" title="Settings">
+            <i data-lucide="settings"></i>
+            <span class="nav-label">Settings</span>
           </button>
         </nav>
 
-        <div class="sidebar-panel">
+        <div class="sidebar-panel sidebar-filters">
           <label for="projectName">Project</label>
           <input id="projectName" type="text" />
           <label for="searchInput">Search</label>
@@ -61,7 +82,7 @@
           </select>
         </div>
 
-        <div class="sidebar-panel compact">
+        <div class="sidebar-panel sidebar-toggles compact">
           <div class="toggle-row">
             <span>Weeks</span>
             <label class="switch">
@@ -69,7 +90,6 @@
               <span></span>
             </label>
           </div>
-        
           <div class="toggle-row">
             <span>Legend</span>
             <label class="switch">
@@ -77,7 +97,6 @@
               <span></span>
             </label>
           </div>
-        
           <div class="toggle-row">
             <span>Dependencies</span>
             <label class="switch">
@@ -89,21 +108,35 @@
             <label>Baseline</label>
             <select id="baselineSelector"></select>
           </div>
-          
         </div>
       </aside>
 
       <main class="main">
         <header class="topbar">
-          <div>
+          <div class="topbar-title">
             <p class="eyebrow">Project schedule</p>
             <h1 id="pageTitle">Schedule Generator</h1>
           </div>
+
+          <div class="project-selector-wrap">
+            <span class="project-selector-label">Projeto atual</span>
+            <div class="project-selector-row">
+              <select id="projectSelector" class="project-selector"></select>
+              <button class="secondary-button" id="newProjectButton" title="Novo projeto">
+                <i data-lucide="plus"></i>
+                Novo
+              </button>
+            </div>
+          </div>
+
           <div class="actions">
-            <button class="icon-button" id="alertsButton" title="Alerts">
+            <!-- Alertas → abre drawer lateral -->
+            <button class="secondary-button" id="alertsButton" title="Alertas">
               <i data-lucide="bell-ring"></i>
-              <span id="alertCount">0</span>
+              Alertas
+              <span class="alerts-count-badge" id="alertCount" hidden>0</span>
             </button>
+
             <button class="secondary-button" id="captureBaselineButton">
               <i data-lucide="camera"></i>Baseline
             </button>
@@ -111,48 +144,75 @@
               <i data-lucide="rotate-ccw"></i>
               Reset
             </button>
-            <button class="secondary-button" id="importJsonButton">
-              <i data-lucide="upload"></i>
-              JSON
-            </button>
+
+            <!-- Export dropdown -->
+            <div class="export-dropdown-wrap">
+              <button class="primary-button" id="exportDropdownButton">
+                <i data-lucide="download"></i>
+                Export
+                <i data-lucide="chevron-down" class="dropdown-chevron"></i>
+              </button>
+              <div class="export-dropdown-menu" id="exportDropdownMenu" hidden>
+                <button class="dropdown-item" id="exportJsonButton">
+                  <i data-lucide="braces"></i>
+                  Export JSON
+                </button>
+                <button class="dropdown-item" id="exportCsvButton">
+                  <i data-lucide="table"></i>
+                  Export CSV
+                </button>
+                <button class="dropdown-item" id="exportCompactPngButton">
+                  <i data-lucide="image"></i>
+                  Export PNG
+                </button>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item" id="importJsonButton">
+                  <i data-lucide="upload"></i>
+                  Import JSON
+                </button>
+              </div>
+            </div>
             <input id="importJsonInput" type="file" accept="application/json,.json" hidden />
-            <button class="secondary-button" id="exportJsonButton">
-              <i data-lucide="download"></i>
-              JSON
-            </button>
-            <button
-  class="secondary-button"
-  id="exportCompactPngButton"
->
-  <i data-lucide="image"></i>
-  PNG
-</button>
-            <button class="primary-button" id="exportCsvButton">
-              <i data-lucide="file-down"></i>
-              CSV
-            </button>
           </div>
         </header>
 
-        <section class="metrics-grid" id="metricsGrid"></section>
+        <!-- VIEW: Dashboard (única view ativa no carregamento) -->
+        <section class="view active" id="dashboardView">
+          <div class="dashboard-header">
+            <div>
+              <p class="eyebrow">Visão geral</p>
+              <h2>Dashboard</h2>
+            </div>
+          </div>
+          <div class="metrics-grid" id="metricsGrid"></div>
+          <div class="dashboard-grid">
+            <div class="dashboard-card">
+              <div class="dashboard-card-head">
+                <h3>Projetos ativos</h3>
+              </div>
+              <div class="table-wrap dashboard-table-wrap">
+                <table id="dashboardProjectsTable"></table>
+              </div>
+            </div>
+            <div class="dashboard-card">
+              <div class="dashboard-card-head">
+                <h3>Próximos marcos</h3>
+              </div>
+              <div class="table-wrap dashboard-table-wrap">
+                <table id="dashboardMilestonesTable"></table>
+              </div>
+            </div>
+          </div>
+        </section>
 
-        <section class="view active" id="timelineView">
+        <!-- VIEW: Timeline — FIX: removido "active" (não deve iniciar visível) -->
+        <section class="view" id="timelineView">
           <div class="timeline-toolbar">
             <div class="legend" id="legend"></div>
-
-
             <div class="zoom-control" aria-label="Timeline zoom">
-              <button class="segmented" data-zoom="week">
-                Week
-              </button>
-            
-              <button class="segmented active" data-zoom="month">
-                Month
-              </button>
-            
-              <button class="segmented" data-zoom="quarter">
-                Quarter
-              </button>
+              <button class="segmented" data-zoom="week">Week</button>
+              <button class="segmented active" data-zoom="month">Month</button>
+              <button class="segmented" data-zoom="quarter">Quarter</button>
             </div>
           </div>
           <div class="timeline-frame">
@@ -160,11 +220,100 @@
           </div>
         </section>
 
+        <!-- VIEW: Timeline Compact -->
+        <section class="view" id="compactView">
+          <div class="compact-topbar">
+            <div class="compact-topbar-left">
+              <p class="eyebrow">Presentation view</p>
+              <h2 id="compactProjectTitle">Timeline Compact</h2>
+              <span class="compact-period" id="compactPeriodLabel"></span>
+            </div>
+            <div class="compact-topbar-right">
+              <button class="secondary-button" id="layoutSettingsButton">
+                <i data-lucide="sliders-horizontal"></i>
+                Layout Settings
+              </button>
+            </div>
+          </div>
+          <div id="presentationExportArea">
+            <div class="timeline-frame">
+              <div class="timeline compact-timeline" id="compactTimeline"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- DRAWER: Layout Settings -->
+        <div class="drawer-overlay" id="layoutDrawerOverlay"></div>
+        <aside class="layout-drawer" id="layoutDrawer" aria-label="Layout settings">
+          <div class="drawer-head">
+            <h3>Layout Settings</h3>
+            <button class="icon-button" id="closeLayoutDrawer" title="Fechar">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="drawer-body">
+            <div class="drawer-section">
+              <p class="drawer-section-label">Zoom</p>
+              <div class="zoom-control drawer-zoom" aria-label="Compact timeline zoom">
+                <button class="segmented compact-zoom" data-compact-zoom="week">Week</button>
+                <button class="segmented compact-zoom active" data-compact-zoom="month">Month</button>
+                <button class="segmented compact-zoom" data-compact-zoom="quarter">Quarter</button>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Labels</p>
+              <div class="zoom-control drawer-zoom" aria-label="Compact label mode">
+                <button class="segmented compact-label active" data-compact-label="weeks">Semanas</button>
+                <button class="segmented compact-label" data-compact-label="days">Dias</button>
+                <button class="segmented compact-label" data-compact-label="dates">Período</button>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Component Width</p>
+              <div class="drawer-slider-row">
+                <input type="range" id="compactLabelWidth" min="80" max="400" value="260" step="10" />
+                <span class="drawer-slider-value" id="compactLabelWidthValue">260px</span>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Month Width</p>
+              <div class="drawer-slider-row">
+                <input type="range" id="compactMonthWidth" min="20" max="200" value="100" step="5" />
+                <span class="drawer-slider-value" id="compactMonthWidthValue">100%</span>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Opções</p>
+              <div class="toggle-row">
+                <span>Semanas</span>
+                <label class="switch">
+                  <input id="weeksToggleDrawer" type="checkbox" checked />
+                  <span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- DRAWER: Alerts -->
+        <div class="drawer-overlay" id="alertsDrawerOverlay"></div>
+        <aside class="alerts-drawer" id="alertsDrawer" aria-label="Alertas">
+          <div class="drawer-head">
+            <div>
+              <p class="eyebrow">Schedule health</p>
+              <h3>Alertas</h3>
+            </div>
+            <button class="icon-button" id="closeAlertsDrawer" title="Fechar">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div id="alertsList" class="alerts-list"></div>
+        </aside>
+
+        <!-- VIEW: Activities -->
         <section class="view" id="activitiesView">
           <div class="section-head">
-            <div>
-              <h2>Activities</h2>
-            </div>
+            <div><h2>Activities</h2></div>
             <button class="primary-button" id="addTaskButton">
               <i data-lucide="plus"></i>
               Activity
@@ -175,13 +324,12 @@
           </div>
         </section>
 
+        <!-- VIEW: Milestones -->
         <section class="view" id="milestonesView">
           <div class="split">
             <div>
               <div class="section-head">
-                <div>
-                  <h2>Project milestones</h2>
-                </div>
+                <div><h2>Project milestones</h2></div>
                 <button class="primary-button" id="addMilestoneButton">
                   <i data-lucide="plus"></i>
                   Milestone
@@ -193,9 +341,7 @@
             </div>
             <div>
               <div class="section-head">
-                <div>
-                  <h2>Free milestones</h2>
-                </div>
+                <div><h2>Free milestones</h2></div>
                 <button class="primary-button" id="addFreeMilestoneButton">
                   <i data-lucide="plus"></i>
                   Marker
@@ -208,72 +354,274 @@
           </div>
         </section>
 
-
-        <section class="view" id="compactView">
-          <div class="timeline-toolbar">
+        <!-- VIEW: Team — FIX: section estava ausente (Etapa 5 só adicionou o nav-tab) -->
+        <section class="view" id="teamView">
+          <div class="team-topbar">
             <div>
-              <p class="eyebrow">Presentation view</p>
-              <h2>Timeline Compact</h2>
+              <p class="eyebrow">Projeto atual</p>
+              <h2 id="teamProjectTitle">Equipe do Projeto</h2>
             </div>
-        
-            <div class="zoom-control" aria-label="Compact timeline zoom">
-              <button class="segmented compact-zoom" data-compact-zoom="week">
-                Week
-              </button>
-        
-              <button class="segmented compact-zoom active" data-compact-zoom="month">
-                Month
-              </button>
-        
-              <button class="segmented compact-zoom" data-compact-zoom="quarter">
-                Quarter
-              </button>
-            </div>
-            <div class="compact-control-group">
-              <span class="compact-control-title">Label</span>
-            
-              <div class="zoom-control" aria-label="Compact label mode">
-                <button class="segmented compact-label active" data-compact-label="weeks">
-                  W
-                </button>
-            
-                <button class="segmented compact-label" data-compact-label="days">
-                  D
-                </button>
-            
-                <button class="segmented compact-label" data-compact-label="dates">
-                  Period
-                </button>
-              </div>
-            </div>
-
           </div>
-        
-          <div id="presentationExportArea">
-            <div class="timeline-frame">
-              <div
-                class="timeline compact-timeline"
-                id="compactTimeline"
-              ></div>
+
+          <div class="team-cards" id="teamCards"></div>
+
+          <div class="team-add-panel">
+            <div class="team-add-head">
+              <i data-lucide="user-plus"></i>
+              <h3>Adicionar membro</h3>
+            </div>
+            <div class="team-add-form">
+              <div class="form-field">
+                <label for="teamMemberName">Nome</label>
+                <input type="text" id="teamMemberName" placeholder="Ex: Thiago Rocha" />
+              </div>
+              <div class="form-field">
+                <label for="teamMemberRole">Função</label>
+                <select id="teamMemberRole">
+                  <option value="Gerente">Gerente</option>
+                  <option value="Analista">Analista</option>
+                </select>
+              </div>
+              <button class="primary-button" id="addTeamMemberButton">
+                <i data-lucide="plus"></i>
+                Adicionar
+              </button>
             </div>
           </div>
         </section>
-        
 
+        <!-- VIEW: Settings — Usuários & Permissões (Etapa 6) -->
+        <section class="view" id="settingsView">
+          <div class="settings-topbar">
+            <div>
+              <p class="eyebrow">Configurações</p>
+              <h2>Usuários &amp; Permissões</h2>
+            </div>
+            <span class="auth-notice">
+              <i data-lucide="shield"></i>
+              Estrutura preparada para autenticação — login disponível em versão futura
+            </span>
+          </div>
+
+          <div class="settings-grid">
+            <!-- Coluna 1: Usuários globais do sistema -->
+            <div class="settings-card">
+              <div class="settings-card-head">
+                <h3>Usuários do sistema</h3>
+                <button class="primary-button" id="addUserButton">
+                  <i data-lucide="user-plus"></i>
+                  Novo usuário
+                </button>
+              </div>
+              <div class="table-wrap dashboard-table-wrap">
+                <table id="usersTable"></table>
+              </div>
+            </div>
+
+            <!-- Coluna 2: Membros vinculados ao projeto ativo -->
+            <div class="settings-card">
+              <div class="settings-card-head">
+                <h3>Membros de: <span id="settingsProjectName" style="color:var(--teal)"></span></h3>
+              </div>
+              <div class="table-wrap dashboard-table-wrap">
+                <table id="projectUsersTable"></table>
+              </div>
+              <div class="settings-link-panel">
+                <div class="team-add-head">
+                  <i data-lucide="link-2"></i>
+                  <h3>Vincular ao projeto</h3>
+                </div>
+                <div class="team-add-form">
+                  <div class="form-field" style="flex:2">
+                    <label for="addProjectUserSelect">Usuário</label>
+                    <select id="addProjectUserSelect"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="addProjectUserFuncao">Função</label>
+                    <select id="addProjectUserFuncao">
+                      <option value="Gerente">Gerente</option>
+                      <option value="Analista">Analista</option>
+                    </select>
+                  </div>
+                  <button class="primary-button" id="addProjectUserButton" style="align-self:flex-end">
+                    <i data-lucide="link-2"></i>
+                    Vincular
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
 
-    <dialog id="alertsDialog">
+    <!-- DIALOG: Project Modal -->
+    <dialog id="projectModal">
       <div class="dialog-head">
         <div>
-          <p class="eyebrow">Schedule health</p>
-          <h2>Alerts</h2>
+          <p class="eyebrow">Gestão de projetos</p>
+          <h2 id="projectModalTitle">Novo Projeto</h2>
         </div>
-        <button class="icon-button" id="closeAlertsButton" title="Close">
+        <button class="icon-button" id="closeProjectModal" title="Fechar">
           <i data-lucide="x"></i>
         </button>
       </div>
-      <div id="alertsList" class="alerts-list"></div>
+      <div class="project-modal-body">
+        <input type="hidden" id="projectModalId" />
+        <div class="form-grid">
+          <div class="form-field form-field-wide">
+            <label for="projectModalName">Nome do Projeto *</label>
+            <input type="text" id="projectModalName" placeholder="Ex: PROJETO ALPHA — BADGE XTR" />
+          </div>
+          <div class="form-field">
+            <label for="projectModalClient">Cliente</label>
+            <input type="text" id="projectModalClient" placeholder="Ex: Stellantis" />
+          </div>
+          <div class="form-field">
+            <label for="projectModalManager">Gerente</label>
+            <input type="text" id="projectModalManager" placeholder="Ex: Thiago Rocha" />
+          </div>
+          <div class="form-field">
+            <label for="projectModalStart">Data Início</label>
+            <input type="date" id="projectModalStart" />
+          </div>
+          <div class="form-field">
+            <label for="projectModalEnd">Data Fim Planejada</label>
+            <input type="date" id="projectModalEnd" />
+          </div>
+          <div class="form-field">
+            <label for="projectModalStatus">Status</label>
+            <select id="projectModalStatus">
+              <option value="Active">Active</option>
+              <option value="On Hold">On Hold</option>
+              <option value="Completed">Completed</option>
+              <option value="Archived">Archived</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="project-modal-footer">
+        <button class="secondary-button" id="cancelProjectModal">Cancelar</button>
+        <button class="primary-button" id="saveProjectModal">
+          <i data-lucide="check"></i>
+          Salvar Projeto
+        </button>
+      </div>
+    </dialog>
+
+    <!-- DIALOG: User Modal -->
+    <dialog id="userModal">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Gestão de usuários</p>
+          <h2 id="userModalTitle">Novo Usuário</h2>
+        </div>
+        <button class="icon-button" id="closeUserModal" title="Fechar">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="project-modal-body">
+        <input type="hidden" id="userModalId" />
+        <div class="form-grid">
+          <div class="form-field form-field-wide">
+            <label for="userModalNome">Nome *</label>
+            <input type="text" id="userModalNome" placeholder="Ex: Thiago Rocha" />
+          </div>
+          <div class="form-field form-field-wide">
+            <label for="userModalEmail">Email</label>
+            <input type="email" id="userModalEmail" placeholder="Ex: thiago@empresa.com" />
+          </div>
+          <div class="form-field form-field-wide">
+            <label for="userModalPerfil">Perfil de acesso</label>
+            <select id="userModalPerfil">
+              <option value="Administrador">Administrador</option>
+              <option value="Gerente">Gerente</option>
+              <option value="Analista" selected>Analista</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="project-modal-footer">
+        <button class="secondary-button" id="cancelUserModal">Cancelar</button>
+        <button class="primary-button" id="saveUserModal">
+          <i data-lucide="check"></i>
+          Salvar
+        </button>
+      </div>
+    </dialog>
+
+    <!-- DIALOG: PNG Export -->
+    <dialog id="pngExportDialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Export</p>
+          <h2>PNG — Timeline Compact</h2>
+        </div>
+        <button class="icon-button" id="closePngDialog" title="Close">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="png-dialog-body">
+        <div class="png-export-controls">
+          <div class="png-controls-left">
+            <div class="png-field">
+              <label>Preview scale</label>
+              <div class="png-slider-row">
+                <input type="range" id="pngScaleSlider" min="20" max="200" value="100" step="5" />
+                <span id="pngScaleValue">100%</span>
+              </div>
+              <div class="png-preset-row">
+                <button class="segmented" id="pngFitBtn">
+                  <i data-lucide="maximize-2"></i>
+                  Auto-fit
+                </button>
+                <button class="segmented" id="pngPptBtn">
+                  <i data-lucide="presentation"></i>
+                  PPT Slide
+                </button>
+              </div>
+            </div>
+            <div class="png-field">
+              <label>Export quality</label>
+              <select id="pngQualitySelect">
+                <option value="2">Standard (2x)</option>
+                <option value="3" selected>High quality (3x) — Recommended</option>
+                <option value="4">Maximum (4x) — PowerPoint</option>
+              </select>
+            </div>
+          </div>
+          <div class="png-controls-right">
+            <p class="png-toggle-section-label">Options</p>
+            <div class="toggle-row">
+              <span>Project title</span>
+              <label class="switch">
+                <input type="checkbox" id="pngIncludeTitle" checked />
+                <span></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span>Grid lines</span>
+              <label class="switch">
+                <input type="checkbox" id="pngShowGrid" checked />
+                <span></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="png-preview-wrap" id="pngPreviewWrap">
+          <canvas id="pngPreviewCanvas"></canvas>
+        </div>
+        <div class="png-dialog-footer">
+          <span class="png-size-hint" id="pngSizeHint"></span>
+          <div class="png-footer-btns">
+            <button class="secondary-button" id="cancelPngButton">Cancel</button>
+            <button class="primary-button" id="confirmPngButton">
+              <i data-lucide="download"></i>
+              Download PNG
+            </button>
+          </div>
+        </div>
+      </div>
     </dialog>
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
