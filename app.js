@@ -70,38 +70,122 @@ const statusMeta = {
   "": { color: "#6f7885", soft: "#e7ebf0", text: "#303640" },
 };
 
+const appShell = document.querySelector(".app-shell");
+
+// Sidebar inicia RECOLHIDA por padrão (Etapa 1)
+// Só expande se o usuário tiver salvo explicitamente "expanded"
+const savedSidebar = localStorage.getItem("sidebar");
+if (savedSidebar !== "expanded") {
+  appShell.classList.add("sidebar-collapsed");
+}
+
+toggleSidebarButton.addEventListener("click", () => {
+  appShell.classList.toggle("sidebar-collapsed");
+  const isCollapsed = appShell.classList.contains("sidebar-collapsed");
+  localStorage.setItem("sidebar", isCollapsed ? "collapsed" : "expanded");
+
+  // Atualiza o title do botão para acessibilidade
+  toggleSidebarButton.title = isCollapsed ? "Expandir menu" : "Recolher menu";
+});
+
+function getActiveProject() {
+  return state.projects?.find(p => p.id === state.activeProjectId)
+    || state.projects?.[0]
+    || null;
+}
+
+// Copia dados do projeto ativo → aliases no root do state
+function syncFromActiveProject(s = state) {
+  const p = s.projects?.find(proj => proj.id === s.activeProjectId)
+    || s.projects?.[0];
+  if (!p) return;
+  s.tasks          = p.tasks          ?? [];
+  s.milestones     = p.milestones     ?? [];
+  s.freeMilestones = p.freeMilestones ?? [];
+  s.dependencies   = p.dependencies   ?? [];
+  s.projectName    = p.name           ?? "";
+}
+
+// Copia aliases do root → projeto ativo (chamado antes de salvar)
+function syncToActiveProject() {
+  const p = getActiveProject();
+  if (!p) return;
+  p.tasks          = state.tasks;
+  p.milestones     = state.milestones;
+  p.freeMilestones = state.freeMilestones;
+  p.dependencies   = state.dependencies;
+  p.name           = state.projectName;
+}
+
+// Normaliza e migra qualquer formato de estado salvo
+function normalizeState(raw) {
+  // Migrar formato pré-Etapa 4 (sem projects[])
+  if (!raw.projects) {
+    const id = crypto.randomUUID();
+    raw = {
+      activeProjectId: id,
+      projects: [{
+        id,
+        name:        raw.projectName || "Projeto 1",
+        client:      "",
+        manager:     "",
+        startDate:   "",
+        endDate:     "",
+        status:      "Active",
+        createdAt:   iso(new Date()),
+        tasks:          raw.tasks          || [],
+        milestones:     raw.milestones     || [],
+        freeMilestones: raw.freeMilestones || [],
+        dependencies:   raw.dependencies   || []
+      }]
+    };
+  }
+
+  // Garante activeProjectId válido
+  if (!raw.projects.find(p => p.id === raw.activeProjectId)) {
+    raw.activeProjectId = raw.projects[0]?.id;
+  }
+
+  // Garante campos obrigatórios em cada projeto
+  raw.projects.forEach(p => {
+    p.tasks          ??= [];
+    p.milestones     ??= [];
+    p.freeMilestones ??= [];
+    p.dependencies   ??= [];
+    p.team ??= [];
+    p.status         ??= "Active";
+    p.client         ??= "";
+    p.manager        ??= "";
+    p.startDate      ??= "";
+    p.endDate        ??= "";
+    p.createdAt      ??= iso(new Date());
+
+    // Baseline migration (Etapa 1)
+    p.tasks.forEach(task => {
+      task.baselines ??= [];
+      if (!task.baselines.length) {
+        task.baselines.push({ id: "v1", start: task.start, end: task.end });
+      }
+    });
+  });
+
+  raw.users        ??= [];   // ← NOVO
+  raw.projectUsers ??= [];   // ← NOVO
+
+  syncFromActiveProject(raw);
+  return raw;
+}
+
+
 const storageKey = "schedule-studio-state-v1";
 let state = loadState();
-state.tasks.forEach((task) => {
-  task.baselines ??= [];
-
-  if (!task.baselines.length) {
-    const version = "v1";
-
-    task.baselines.push({
-      id: version,
-      start: task.start,
-      end: task.end
-    });
-  }
-});
-state.dependencies ??= [];
-
-if (
-  !state.dependencies.length &&
-  state.tasks.length >= 2
-) {
-  state.dependencies.push({
-    id: crypto.randomUUID(),
-    predecessorId: state.tasks[0].id,
-    successorId: state.tasks[1].id,
-    type: "FS"
-  });
-}
 let zoom = "month";
 let compactZoom = "month";
 let compactLabelMode = "weeks";
 let activeBaselineId = "v1";
+let compactLabelColWidth = 260;   // largura da coluna de componentes em px
+let compactMonthScale = 1.0; 
+
 const zoomConfig = {
   week: {
     pxPerDay: 9,
@@ -126,7 +210,15 @@ const history = {
 };
 
 function cloneState() {
-  return JSON.parse(JSON.stringify(state));
+  syncToActiveProject();
+  const snapshot = JSON.parse(JSON.stringify({
+    activeProjectId: state.activeProjectId,
+    users:           state.users        ?? [],
+    projectUsers:    state.projectUsers ?? [],
+    projects:        state.projects
+  }));
+  syncFromActiveProject(snapshot);
+  return snapshot
 }
 
 function renderBaselineSelector() {
@@ -148,6 +240,26 @@ function renderBaselineSelector() {
   select.value = activeBaselineId;
 }
 
+function renderProjectSelector() {
+  const sel = document.getElementById("projectSelector");
+  if (!sel) return;
+
+  const active   = state.projects.filter(p => p.status !== "Archived");
+  const archived = state.projects.filter(p => p.status === "Archived");
+
+  let html = active
+    .map(p => `<option value="${p.id}" ${p.id === state.activeProjectId ? "selected" : ""}>${escapeHtml(p.name)}</option>`)
+    .join("");
+
+  if (archived.length) {
+    html += `<optgroup label="Arquivados">${
+      archived.map(p => `<option value="${p.id}" ${p.id === state.activeProjectId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")
+    }</optgroup>`;
+  }
+
+  sel.innerHTML = html;
+}
+
 function commitState() {
   history.undoStack.push(cloneState());
 
@@ -160,24 +272,446 @@ function commitState() {
 
 function undo() {
   if (!history.undoStack.length) return;
-
   history.redoStack.push(cloneState());
-
   state = history.undoStack.pop();
-
+  syncFromActiveProject();
   saveState();
   renderAll();
 }
 
 function redo() {
   if (!history.redoStack.length) return;
-
   history.undoStack.push(cloneState());
-
   state = history.redoStack.pop();
+  syncFromActiveProject();
+  saveState();
+  renderAll();
+}
+
+function switchProject(id) {
+  if (!id || id === state.activeProjectId) return;
+  commitState();
+
+  const loader = document.getElementById("mainLoader");
+  if (loader) loader.hidden = false;
+
+  syncToActiveProject();
+  state.activeProjectId = id;
+  syncFromActiveProject();
+  saveState();
+  renderAll();
+
+  if (loader) loader.hidden = true;
+
+  const p = getActiveProject();
+  showToast(`Projeto "${p?.name}" ativado`, "info");
+}
+
+function createProject(data) {
+  commitState();
+  syncToActiveProject();
+
+  const id = crypto.randomUUID();
+  const newProject = {
+    id,
+    name:        data.name      || "Novo Projeto",
+    client:      data.client    || "",
+    manager:     data.manager   || "",
+    startDate:   data.startDate || "",
+    endDate:     data.endDate   || "",
+    status:      "Active",
+    createdAt:   iso(new Date()),
+    team: [],
+    tasks:          [],
+    milestones:     [],
+    freeMilestones: [],
+    dependencies:   []
+  };
+
+  state.projects.push(newProject);
+  state.activeProjectId = id;
+  syncFromActiveProject();
+  saveState();
+  renderAll();
+  showToast(`Projeto "${newProject.name}" criado`);
+}
+
+function updateProject(id, data) {
+  commitState();
+  const p = state.projects.find(proj => proj.id === id);
+  if (!p) return;
+
+  Object.assign(p, data);
+
+  // Se é o projeto ativo, atualiza o alias
+  if (id === state.activeProjectId) {
+    state.projectName = p.name;
+  }
 
   saveState();
   renderAll();
+  showToast("Projeto atualizado");
+}
+
+function archiveProject(id) {
+  if (!confirm("Arquivar este projeto? Ele não será excluído.")) return;
+  commitState();
+
+  const p = state.projects.find(proj => proj.id === id);
+  if (!p) return;
+
+  p.status = "Archived";
+
+  // Se arquivou o projeto ativo, muda para o próximo disponível
+  if (id === state.activeProjectId) {
+    const next = state.projects.find(proj => proj.id !== id && proj.status !== "Archived");
+    if (next) {
+      state.activeProjectId = next.id;
+      syncFromActiveProject();
+    }
+  }
+
+  saveState();
+  renderAll();
+  showToast(`Projeto "${p.name}" arquivado`, "warning")
+}
+
+function duplicateProject(id) {
+  commitState();
+  syncToActiveProject();
+
+  const source = state.projects.find(p => p.id === id);
+  if (!source) return;
+
+  const newId = crypto.randomUUID();
+  const copy  = JSON.parse(JSON.stringify(source));
+
+  copy.id        = newId;
+  copy.name      = `${source.name} (cópia)`;
+  copy.status    = "Active";
+  copy.createdAt = iso(new Date());
+
+  // Remapeia IDs das tasks para evitar colisões
+  copy.tasks          = copy.tasks.map(t  => ({ ...t,  id: crypto.randomUUID() }));
+  copy.milestones     = copy.milestones.map(m => ({ ...m, id: crypto.randomUUID() }));
+  copy.freeMilestones = copy.freeMilestones.map(m => ({ ...m, id: crypto.randomUUID() }));
+  copy.team         = (copy.team || []).map(m => ({ ...m, id: crypto.randomUUID() }));
+  copy.dependencies = []; // IDs de tasks mudaram — resetar
+
+  state.projects.push(copy);
+  state.activeProjectId = newId;
+  syncFromActiveProject();
+  saveState();
+  renderAll();
+  showToast(`Projeto duplicado: "${copy.name}"`);
+}
+
+function renderSettingsView() {
+  const nameEl = document.getElementById("settingsProjectName");
+  if (nameEl) nameEl.textContent = getActiveProject()?.name || "—";
+
+  renderUsersTable();
+  renderProjectUsersTable();
+  populateAddProjectUserSelect();
+}
+
+function renderUsersTable() {
+  const el = document.getElementById("usersTable");
+  if (!el) return;
+
+  const perfilMeta = {
+    "Administrador": { color: "var(--red)",    soft: "var(--red-soft)"    },
+    "Gerente":       { color: "var(--teal)",   soft: "var(--teal-soft)"   },
+    "Analista":      { color: "var(--indigo)", soft: "var(--indigo-soft)" },
+  };
+
+  const users = state.users ?? [];
+
+  if (!users.length) {
+    el.innerHTML = `
+      <thead><tr><th>Nome</th><th>Email</th><th>Perfil</th><th></th></tr></thead>
+      <tbody><tr><td colspan="4">
+        <div class="empty-state" style="padding:24px">Nenhum usuário cadastrado.</div>
+      </td></tr></tbody>`;
+    return;
+  }
+
+  const rows = users.map(u => {
+    const meta = perfilMeta[u.perfil] || perfilMeta["Analista"];
+    return `<tr>
+      <td><strong>${escapeHtml(u.nome)}</strong></td>
+      <td style="color:var(--muted);font-size:13px">${escapeHtml(u.email || "—")}</td>
+      <td>
+        <span class="auth-badge" style="background:${meta.soft};color:${meta.color}">
+          ${escapeHtml(u.perfil)}
+        </span>
+      </td>
+      <td>
+        <div class="project-row-actions" style="opacity:1">
+          <button class="row-action" data-edit-user="${u.id}" title="Editar">
+            <i data-lucide="pencil"></i>
+          </button>
+          <button class="row-action" data-delete-user="${u.id}" title="Remover">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <thead><tr><th>Nome</th><th>Email</th><th>Perfil</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>`;
+}
+
+function renderProjectUsersTable() {
+  const el = document.getElementById("projectUsersTable");
+  if (!el) return;
+
+  const proj = getActiveProject();
+  if (!proj) return;
+
+  const projectUsers = state.projectUsers ?? [];
+  const linked = projectUsers.filter(pu => pu.projectId === proj.id);
+
+  const perfilMeta = {
+    "Gerente":  { color: "var(--teal)",   soft: "var(--teal-soft)"   },
+    "Analista": { color: "var(--indigo)", soft: "var(--indigo-soft)" },
+  };
+
+  if (!linked.length) {
+    el.innerHTML = `
+      <thead><tr><th>Usuário</th><th>Email</th><th>Função</th><th></th></tr></thead>
+      <tbody><tr><td colspan="4">
+        <div class="empty-state" style="padding:24px">Nenhum usuário vinculado a este projeto.</div>
+      </td></tr></tbody>`;
+    return;
+  }
+
+  const rows = linked.map(pu => {
+    const user = (state.users ?? []).find(u => u.id === pu.userId);
+    if (!user) return "";
+    const meta = perfilMeta[pu.funcao] || perfilMeta["Analista"];
+    return `<tr>
+      <td><strong>${escapeHtml(user.nome)}</strong></td>
+      <td style="color:var(--muted);font-size:13px">${escapeHtml(user.email || "—")}</td>
+      <td>
+        <span class="auth-badge" style="background:${meta.soft};color:${meta.color}">
+          ${escapeHtml(pu.funcao)}
+        </span>
+      </td>
+      <td>
+        <div class="project-row-actions" style="opacity:1">
+          <button class="row-action" data-remove-project-user="${pu.id}" title="Desvincular">
+            <i data-lucide="link-2-off"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <thead><tr><th>Usuário</th><th>Email</th><th>Função</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>`;
+}
+
+function populateAddProjectUserSelect() {
+  const sel = document.getElementById("addProjectUserSelect");
+  if (!sel) return;
+
+  const proj = getActiveProject();
+  const linkedIds = new Set(
+    (state.projectUsers ?? [])
+      .filter(pu => pu.projectId === proj?.id)
+      .map(pu => pu.userId)
+  );
+
+  const available = (state.users ?? []).filter(u => !linkedIds.has(u.id));
+
+  sel.innerHTML = available.length
+    ? `<option value="">Selecionar usuário...</option>` +
+      available.map(u =>
+        `<option value="${u.id}">${escapeHtml(u.nome)} — ${escapeHtml(u.perfil)}</option>`
+      ).join("")
+    : `<option value="">Nenhum usuário disponível</option>`;
+}
+
+// ── CRUD de usuários ─────────────────────────────────────────
+
+function openUserModal(userId = null) {
+  const modal   = document.getElementById("userModal");
+  const titleEl = document.getElementById("userModalTitle");
+
+  if (userId) {
+    const u = (state.users ?? []).find(user => user.id === userId);
+    if (!u) return;
+    titleEl.textContent = "Editar Usuário";
+    document.getElementById("userModalId").value     = u.id;
+    document.getElementById("userModalNome").value   = u.nome;
+    document.getElementById("userModalEmail").value  = u.email  || "";
+    document.getElementById("userModalPerfil").value = u.perfil || "Analista";
+  } else {
+    titleEl.textContent = "Novo Usuário";
+    document.getElementById("userModalId").value     = "";
+    document.getElementById("userModalNome").value   = "";
+    document.getElementById("userModalEmail").value  = "";
+    document.getElementById("userModalPerfil").value = "Analista";
+  }
+
+  modal.showModal();
+}
+
+function saveUser() {
+  const id     = document.getElementById("userModalId").value;
+  const nome   = document.getElementById("userModalNome").value.trim();
+  const email  = document.getElementById("userModalEmail").value.trim();
+  const perfil = document.getElementById("userModalPerfil").value;
+
+  if (!validateRequired("userModalNome")) return;
+
+  commitState();
+  state.users ??= [];
+
+  if (id) {
+    const u = state.users.find(user => user.id === id);
+    if (u) Object.assign(u, { nome, email, perfil });
+    showToast("Usuário atualizado");
+  } else {
+    state.users.push({ id: crypto.randomUUID(), nome, email, perfil });
+    showToast(`Usuário "${nome}" criado`);
+  }
+
+  saveState();
+  renderSettingsView();
+  lucide.createIcons();
+  document.getElementById("userModal").close();
+}
+
+function removeUser(userId) {
+  if (!confirm("Remover este usuário? Ele será desvinculado de todos os projetos.")) return;
+  commitState();
+  state.users        = (state.users        ?? []).filter(u  => u.id  !== userId);
+  state.projectUsers = (state.projectUsers ?? []).filter(pu => pu.userId !== userId);
+  saveState();
+  renderSettingsView();
+  lucide.createIcons();
+  showToast("Usuário removido", "warning")
+}
+
+// ── Vínculos ProjetoUsuário ───────────────────────────────────
+
+function addProjectUser(userId, funcao) {
+  if (!userId) { showToast("Selecione um usuário"); return; }
+
+  const proj = getActiveProject();
+  if (!proj) return;
+
+  state.projectUsers ??= [];
+
+  const alreadyLinked = state.projectUsers.some(
+    pu => pu.projectId === proj.id && pu.userId === userId
+  );
+  if (alreadyLinked) { showToast("Usuário já vinculado a este projeto"); return; }
+
+  commitState();
+  state.projectUsers.push({
+    id:        crypto.randomUUID(),
+    projectId: proj.id,
+    userId,
+    funcao
+  });
+
+  saveState();
+  renderSettingsView();
+  lucide.createIcons();
+
+  const user = (state.users ?? []).find(u => u.id === userId);
+  showToast(`${user?.nome || "Usuário"} vinculado como ${funcao}`);
+}
+
+function removeProjectUser(projectUserId) {
+  commitState();
+  state.projectUsers = (state.projectUsers ?? []).filter(pu => pu.id !== projectUserId);
+  saveState();
+  renderSettingsView();
+  lucide.createIcons();
+  showToast("Vínculo removido");
+}
+
+
+function addTeamMember(name, role) {
+  const name_ = name.trim();
+  if (!name_) { showToast("Informe o nome do membro"); return; }
+
+  const p = getActiveProject();
+  if (!p) return;
+
+  // Impede duplicata de gerente
+  if (role === "Gerente" && p.team?.some(m => m.role === "Gerente")) {
+    showToast("Este projeto já possui um Gerente. Remova o atual antes de adicionar um novo.");
+    return;
+  }
+
+  commitState();
+  p.team ??= [];
+  p.team.push({ id: crypto.randomUUID(), name: name_, role });
+
+  // Se for Gerente, sincroniza o campo manager do projeto
+  if (role === "Gerente") p.manager = name_;
+
+  saveState();
+  renderTeamView();
+  lucide.createIcons();
+  showToast(`${name_} adicionado(a) como ${role}`);
+}
+
+function removeTeamMember(memberId) {
+  const p = getActiveProject();
+  if (!p || !p.team) return;
+
+  const member = p.team.find(m => m.id === memberId);
+  if (!member) return;
+
+  commitState();
+  p.team = p.team.filter(m => m.id !== memberId);
+
+  // Se era o Gerente, limpa o campo manager
+  if (member.role === "Gerente") p.manager = "";
+
+  saveState();
+  renderTeamView();
+  lucide.createIcons();
+  showToast(`${member.name} removido(a) da equipe`, "warning")
+}
+
+
+function openProjectModal(projectId = null) {
+  const modal   = document.getElementById("projectModal");
+  const titleEl = document.getElementById("projectModalTitle");
+
+  if (projectId) {
+    const p = state.projects.find(proj => proj.id === projectId);
+    if (!p) return;
+    titleEl.textContent = "Editar Projeto";
+    document.getElementById("projectModalId").value      = p.id;
+    document.getElementById("projectModalName").value    = p.name;
+    document.getElementById("projectModalClient").value  = p.client   || "";
+    document.getElementById("projectModalManager").value = p.manager  || "";
+    document.getElementById("projectModalStart").value   = p.startDate || "";
+    document.getElementById("projectModalEnd").value     = p.endDate   || "";
+    document.getElementById("projectModalStatus").value  = p.status   || "Active";
+  } else {
+    titleEl.textContent = "Novo Projeto";
+    document.getElementById("projectModalId").value      = "";
+    document.getElementById("projectModalName").value    = "";
+    document.getElementById("projectModalClient").value  = "";
+    document.getElementById("projectModalManager").value = "";
+    document.getElementById("projectModalStart").value   = "";
+    document.getElementById("projectModalEnd").value     = "";
+    document.getElementById("projectModalStatus").value  = "Active";
+  }
+
+  modal.showModal();
 }
 
 const $ = (selector) => document.querySelector(selector);
@@ -186,12 +720,39 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 function loadState() {
   const saved = localStorage.getItem(storageKey);
-  if (!saved) return structuredClone(seed);
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return structuredClone(seed);
+  let raw = null;
+
+  if (saved) {
+    try { raw = JSON.parse(saved); } catch { raw = null; }
   }
+
+  if (!raw) {
+    // Sem estado salvo — constrói a partir do seed
+    const id = crypto.randomUUID();
+    raw = {
+      activeProjectId: id,
+      users:        [],     // ← NOVO
+      projectUsers: [],     // ← NOVO
+      projects: [{
+        id,
+        name:        seed.projectName,
+        client:      "",
+        manager:     "",
+        startDate:   "",
+        endDate:     "",
+        status:      "Active",
+        createdAt:   iso(new Date()),
+        tasks:          structuredClone(seed.tasks),
+        milestones:     structuredClone(seed.milestones),
+        freeMilestones: structuredClone(seed.freeMilestones),
+        dependencies:   structuredClone(seed.dependencies ?? [])
+      }]
+    };
+    syncFromActiveProject(raw);
+    return raw;
+  }
+
+  return normalizeState(raw);
 }
 
 
@@ -218,9 +779,24 @@ function captureBaseline() {
   showToast("New baseline version created");
 }
 
+function showSaveIndicator() {
+  const el = document.getElementById("saveIndicator");
+  if (!el) return;
+  el.classList.add("visible");
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove("visible"), 2200);
+}
+
 
 function saveState() {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  syncToActiveProject();
+  localStorage.setItem(storageKey, JSON.stringify({
+    activeProjectId: state.activeProjectId,
+    users:           state.users        ?? [],
+    projectUsers:    state.projectUsers ?? [],
+    projects:        state.projects
+  }));
+  showSaveIndicator();
 }
 
 function dateValue(value) {
@@ -267,12 +843,23 @@ function getRange(tasks = state.tasks) {
     ...state.milestones.flatMap((item) => [dateValue(item.start), dateValue(item.end)]),
     ...state.freeMilestones.map((item) => dateValue(item.date)),
   ].filter(Boolean);
+
+  // FIX: projeto vazio → fallback de 3 meses a partir de hoje
+  if (!dates.length) {
+    const today = new Date();
+    const next  = new Date(today);
+    next.setMonth(next.getMonth() + 3);
+    today.setDate(1);
+    return { min: today, max: next };
+  }
+
   const min = new Date(Math.min(...dates));
   const max = new Date(Math.max(...dates));
   min.setDate(1);
   max.setMonth(max.getMonth() + 1, 0);
   return { min, max };
 }
+
 
 function getMonths(min, max) {
   const months = [];
@@ -303,17 +890,260 @@ function metric(label, value, hint) {
 function renderMetrics() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const completed = state.tasks.filter((task) => task.status === "Concluded" || task.status === "Concluded with a delay").length;
-  const late = state.tasks.filter((task) => dateValue(task.end) < today && task.status !== "Concluded").length;
-  const components = new Set(state.tasks.map((task) => task.component)).size;
-  const { min, max } = getRange();
+
+  const total     = state.tasks.length;
+  const completed = state.tasks.filter(t =>
+    t.status === "Concluded" || t.status === "Concluded with a delay"
+  ).length;
+  const late = state.tasks.filter(t =>
+    dateValue(t.end) < today &&
+    t.status !== "Concluded" &&
+    t.status !== "Concluded with a delay"
+  ).length;
+  const components     = new Set(state.tasks.map(t => t.component)).size;
+  const activeProjects = state.projects.filter(p => p.status !== "Archived").length; // FIX
+  const pct            = total ? Math.round((completed / total) * 100) : 0;           // FIX
+
   $("#metricsGrid").innerHTML = [
-    metric("Activities", state.tasks.length, `${components} components`),
-    metric("Completed", completed, `${Math.round((completed / state.tasks.length) * 100)}% of schedule`),
-    metric("Open alerts", late, "Overdue or attention required"),
-    metric("Range", `${monthLabel(min)} - ${monthLabel(max)}`, `${Math.round((max - min) / dayMs)} days`),
+    metric("Projetos ativos",   activeProjects, "em andamento"),
+    metric("Atividades totais", total,          `${components} componentes`),
+    metric("Concluídas",        completed,      `${pct}% do cronograma`),
+    metric("Alertas abertos",   late,           "atrasadas ou atenção"),
   ].join("");
 }
+
+function renderDashboard() {
+  renderMetrics();
+  renderDashboardProjectsTable();
+  renderDashboardMilestonesTable();
+}
+
+function renderDashboardProjectsTable() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const projStatusMeta = {
+    "Active":    { color: "#4a76b8", soft: "#dbe8f8", text: "#17365d" },
+    "On Hold":   { color: "#b87900", soft: "#fff1c7", text: "#5d3b00" },
+    "Completed": { color: "#367c4d", soft: "#dff3ef", text: "#1a4d2e" },
+    "Archived":  { color: "#6f7885", soft: "#e7ebf0", text: "#303640" },
+  };
+
+  const visible = state.projects.filter(p => p.status !== "Archived");
+
+  const rows = visible.map(proj => {
+    const tasks     = proj.tasks || [];
+    const concluded = tasks.filter(t =>
+      t.status === "Concluded" || t.status === "Concluded with a delay"
+    ).length;
+    const late = tasks.filter(t =>
+      dateValue(t.end) < today &&
+      t.status !== "Concluded" &&
+      t.status !== "Concluded with a delay"
+    ).length;
+    const progress = tasks.length ? Math.round((concluded / tasks.length) * 100) : 0;
+    const meta     = projStatusMeta[proj.status] || projStatusMeta["Active"];
+    const isActive = proj.id === state.activeProjectId;
+
+    // Data final: campo do projeto ou última task
+    const endDate = proj.endDate
+      ? formatDate(proj.endDate)
+      : tasks.length
+        ? formatDate(tasks.reduce((m, t) => t.end > m ? t.end : m, ""))
+        : "—";
+
+    return `<tr
+      class="${isActive ? "row-active-project" : ""}"
+      style="cursor:pointer"
+      data-switch-project="${proj.id}"
+    >
+      <td>
+        <strong>${escapeHtml(proj.name)}</strong>
+        ${isActive ? '<span class="active-project-dot" title="Projeto ativo"></span>' : ""}
+        ${proj.client ? `<small style="display:block;color:var(--muted);font-size:11px">${escapeHtml(proj.client)}</small>` : ""}
+      </td>
+      <td>${proj.manager ? escapeHtml(proj.manager) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>
+        <span class="status-badge" style="background:${meta.soft};color:${meta.text}">
+          ${escapeHtml(proj.status)}
+        </span>
+      </td>
+      <td>
+        <div class="progress-cell">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" style="width:${progress}%;background:${meta.color}"></div>
+          </div>
+          <span class="progress-pct">${progress}%</span>
+        </div>
+      </td>
+      <td>${endDate}</td>
+      <td>${late > 0
+        ? `<span class="alert-badge">${late}</span>`
+        : '<span style="color:var(--muted)">—</span>'
+      }</td>
+      <td>
+        <div class="project-row-actions">
+          <button class="row-action" data-edit-project="${proj.id}"      title="Editar"><i data-lucide="pencil"></i></button>
+          <button class="row-action" data-duplicate-project="${proj.id}" title="Duplicar"><i data-lucide="copy"></i></button>
+          <button class="row-action" data-archive-project="${proj.id}"   title="Arquivar"><i data-lucide="archive"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  if (!rows.length) {
+    rows.push(`<tr><td colspan="7"><div class="empty-state" style="padding:24px">Nenhum projeto ativo.</div></td></tr>`);
+  }
+
+  document.getElementById("dashboardProjectsTable").innerHTML = `
+    <thead>
+      <tr>
+        <th>Projeto</th><th>Gerente</th><th>Status</th>
+        <th>Progresso</th><th>Data Final</th><th>Alertas</th><th></th>
+      </tr>
+    </thead>
+    <tbody>${rows.join("")}</tbody>
+  `;
+}
+
+
+function renderDashboardMilestonesTable() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Coleta milestones do projeto + task milestones com data futura ou recente (últimos 30 dias)
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - 30);
+
+  const items = [];
+
+  // Milestones globais
+  state.milestones.forEach(m => {
+    if (!m.start) return;
+    const d = dateValue(m.start);
+    if (d >= cutoff) {
+      items.push({
+        project: state.projectName || "—",
+        name: m.name,
+        date: m.start,
+        daysLeft: Math.ceil((d - today) / dayMs),
+      });
+    }
+  });
+
+  // Task milestones
+  state.tasks.forEach(t => {
+    if (!t.milestoneDate) return;
+    const d = dateValue(t.milestoneDate);
+    if (d >= cutoff) {
+      items.push({
+        project: escapeHtml(t.component),
+        name: t.milestone || "Milestone",
+        date: t.milestoneDate,
+        daysLeft: Math.ceil((d - today) / dayMs),
+      });
+    }
+  });
+
+  // Ordena por data
+  items.sort((a, b) => dateValue(a.date) - dateValue(b.date));
+
+  const rows = items.slice(0, 10).map(item => {
+    const isLate   = item.daysLeft < 0;
+    const isClose  = item.daysLeft >= 0 && item.daysLeft <= 7;
+    const daysLabel = isLate
+      ? `<span style="color:var(--red);font-weight:700">${Math.abs(item.daysLeft)}d atrasado</span>`
+      : isClose
+        ? `<span style="color:var(--amber);font-weight:700">${item.daysLeft}d restantes</span>`
+        : `<span style="color:var(--muted)">${item.daysLeft}d restantes</span>`;
+
+    return `<tr>
+      <td>${escapeHtml(item.project)}</td>
+      <td><strong>${escapeHtml(item.name)}</strong></td>
+      <td>${formatDate(item.date)}</td>
+      <td>${daysLabel}</td>
+    </tr>`;
+  });
+
+  $("#dashboardMilestonesTable").innerHTML = `
+    <thead>
+      <tr>
+        <th>Projeto</th>
+        <th>Marco</th>
+        <th>Data</th>
+        <th>Dias restantes</th>
+      </tr>
+    </thead>
+    <tbody>${rows.join("") || `<tr><td colspan="4" class="empty-state" style="padding:24px">Nenhum marco próximo.</td></tr>`}</tbody>
+  `;
+}
+
+
+function renderTeamView() {
+  const p = getActiveProject();
+
+  // Título com nome do projeto
+  const titleEl = document.getElementById("teamProjectTitle");
+  if (titleEl) titleEl.textContent = `Equipe — ${p?.name || "Projeto"}`;
+
+  const container = document.getElementById("teamCards");
+  if (!container) return;
+
+  const team = p?.team || [];
+
+  if (!team.length) {
+    container.innerHTML = `
+      <div class="team-empty">
+        <i data-lucide="users" style="width:40px;height:40px;color:var(--muted)"></i>
+        <p>Nenhum membro na equipe.</p>
+        <small>Use o formulário abaixo para adicionar o primeiro membro.</small>
+      </div>`;
+    return;
+  }
+
+  // Ordena: Gerentes primeiro, depois Analistas, ambos em ordem alfabética
+  const sorted = [...team].sort((a, b) => {
+    if (a.role === b.role) return a.name.localeCompare(b.name);
+    return a.role === "Gerente" ? -1 : 1;
+  });
+
+  const roleMeta = {
+    "Gerente":  { color: "var(--teal)",   soft: "var(--teal-soft)",  icon: "shield-check" },
+    "Analista": { color: "var(--indigo)", soft: "var(--indigo-soft)", icon: "bar-chart-2"  },
+  };
+
+  container.innerHTML = sorted.map(member => {
+    const meta    = roleMeta[member.role] || roleMeta["Analista"];
+    const initials = member.name
+      .split(" ")
+      .map(w => w[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+
+    return `
+      <div class="team-card">
+        <div class="team-card-avatar" style="background:${meta.soft};color:${meta.color}">
+          ${initials}
+        </div>
+        <div class="team-card-info">
+          <strong>${escapeHtml(member.name)}</strong>
+          <span class="team-role-badge" style="background:${meta.soft};color:${meta.color}">
+            <i data-lucide="${meta.icon}"></i>
+            ${escapeHtml(member.role)}
+          </span>
+        </div>
+        <button
+          class="row-action team-remove-btn"
+          data-remove-member="${member.id}"
+          title="Remover ${escapeHtml(member.name)}"
+        >
+          <i data-lucide="x"></i>
+        </button>
+      </div>`;
+  }).join("");
+}
+
 
 function renderFilters() {
   const components = ["all", ...new Set(state.tasks.map((task) => task.component))];
@@ -679,31 +1509,70 @@ function tableSelect(value, options, dataset) {
 
 function renderTasksTable() {
   const statuses = ["", "On time", "Attention point", "Delayed", "Concluded", "Concluded with a delay"];
-  $("#tasksTable").innerHTML = `<thead><tr>
-    <th>Component</th><th>Description</th><th>Initial</th><th>Final</th><th>Status</th><th>%</th>
-<th>Milestone</th>
-<th>Date</th>
-<th>Predecessor</th>
-<th>Dependency</th>
-<th>Level</th><th></th>
-  </tr></thead><tbody>${state.tasks
-    .map(
-      (task) => `<tr data-id="${task.id}">
-      <td>${tableInput(task.component, "text", 'data-field="component"')}</td>
-      <td>${tableInput(task.description, "text", 'data-field="description"')}</td>
-      <td>${tableInput(task.start, "date", 'data-field="start"')}</td>
-      <td>${tableInput(task.end, "date", 'data-field="end"')}</td>
-      <td>${tableSelect(task.status || "", statuses, 'data-field="status"')}</td>
-      <td>${tableInput(task.progress ?? 0, "number", 'min="0" max="1" step="0.05" data-field="progress"')}</td>
-      <td>${tableInput(task.milestone, "text", 'data-field="milestone"')}</td>
-      <td>${tableInput(task.milestoneDate, "date", 'data-field="milestoneDate"')}</td>      
-      <td>${dependencySelect(task)}</td>
-      <td>${dependencyTypeSelect(task)}</td>
-      <td>${tableInput(task.level ?? 0, "number", 'min="0" max="10" data-field="level"')}</td>
-      <td><button class="row-action" data-delete-task="${task.id}" title="Delete"><i data-lucide="trash-2"></i></button></td>
-    </tr>`,
-    )
-    .join("")}</tbody>`;
+
+  // ETAPA 8 — PATCH G: Criação da variável com tratamento de empty state
+  const taskRows = state.tasks.length
+    ? state.tasks
+        .map(
+          (task) => `<tr data-id="${task.id}">
+        <td>${tableInput(task.component, "text", 'data-field="component"')}</td>
+        <td>${tableInput(task.description, "text", 'data-field="description"')}</td>
+        <td>${tableInput(task.start, "date", 'data-field="start"')}</td>
+        <td>${tableInput(task.end, "date", 'data-field="end"')}</td>
+        <td>${tableSelect(task.status || "", statuses, 'data-field="status"')}</td>
+        <td>${tableInput(task.progress ?? 0, "number", 'min="0" max="1" step="0.05" data-field="progress"')}</td>
+        <td>${tableInput(task.milestone, "text", 'data-field="milestone"')}</td>
+        <td>${tableInput(task.milestoneDate, "date", 'data-field="milestoneDate"')}</td>
+        <td>${dependencySelect(task)}</td>
+        <td>${dependencyTypeSelect(task)}</td>
+        <td>${tableInput(task.level ?? 0, "number", 'min="0" max="10" data-field="level"')}</td>
+        <td><button class="row-action" data-delete-task="${task.id}" title="Delete">
+          <i data-lucide="trash-2"></i>
+        </button></td>
+      </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="12">
+        <div class="view-empty-state" style="text-align: center; padding: 20px;">
+          <i data-lucide="inbox"></i>
+          <p style="margin: 8px 0 4px 0; font-weight: bold;">Nenhuma atividade cadastrada</p>
+          <small style="color: #666;">Clique em "+ Activity" para começar.</small>
+        </div>
+      </td></tr>`;
+
+  // Renderização final substituindo o innerHTML por .html() do jQuery
+const table = document.getElementById("tasksTable");
+
+if (!table) {
+  console.error("tasksTable não encontrada");
+  return;
+}
+
+table.innerHTML = `
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>Description</th>
+      <th>Initial</th>
+      <th>Final</th>
+      <th>Status</th>
+      <th>%</th>
+      <th>Milestone</th>
+      <th>Date</th>
+      <th>Predecessor</th>
+      <th>Dependency</th>
+      <th>Level</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    ${taskRows}
+  </tbody>
+`;
+
+  // DICA: Se os seus ícones do Lucide (trash-2 e inbox) sumirem ao renderizar, 
+  // descomente a linha abaixo para forçar o Lucide a recarregá-los na tela:
+  // if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function renderMilestoneTables() {
@@ -798,21 +1667,30 @@ function dependencyTypeSelect(task) {
 }
 
 function renderAlerts() {
-  const alerts = getAlerts();
-  $("#alertCount").textContent = alerts.length;
+  const alerts  = getAlerts();
+  const countEl = $("#alertCount");
+
+  if (countEl) {
+    countEl.textContent = alerts.length;
+    countEl.hidden = alerts.length === 0; // oculta badge quando zerado
+  }
+
   $("#alertsList").innerHTML = alerts.length
-    ? alerts
-        .map((alert) => {
-          const color = alert.days < 0 ? "var(--red)" : alert.days <= 7 ? "var(--amber)" : "var(--teal)";
-          const due = alert.days < 0 ? `${Math.abs(alert.days)} days late` : `${alert.days} days left`;
-          return `<article class="alert-card" style="--alert:${color}">
+    ? alerts.map(alert => {
+        const color = alert.days < 0
+          ? "var(--red)"
+          : alert.days <= 7 ? "var(--amber)" : "var(--teal)";
+        const due = alert.days < 0
+          ? `${Math.abs(alert.days)} days late`
+          : `${alert.days} days left`;
+        return `<article class="alert-card" style="--alert:${color}">
           <strong>${escapeHtml(alert.category)} · ${escapeHtml(alert.task.component)}</strong>
           <span>${escapeHtml(alert.task.description)} · ${formatDate(alert.task.end)} · ${due} · ${escapeHtml(alert.task.status || "No status")}</span>
         </article>`;
-        })
-        .join("")
-    : `<div class="empty-state">No open alerts.</div>`;
+      }).join("")
+    : `<div class="empty-state">Nenhum alerta aberto.</div>`;
 }
+
 
 function getWeekNumber(date) {
   const current = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -882,142 +1760,87 @@ function renderCompactMonthBands(months, min, max, pxPerDay) {
 
 function renderCompactTimeline() {
   const tasks = getFilteredTasks().sort(
-    (a, b) =>
-      a.component.localeCompare(b.component) ||
-      dateValue(a.start) - dateValue(b.start)
+    (a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start)
   );
-
+  if (!tasks.length) {
+    const ct = document.getElementById("compactTimeline");
+    if (ct) ct.innerHTML = `
+      <div class="view-empty-state" style="padding:80px 24px">
+        <i data-lucide="layout-template"></i>
+        <p>Nenhuma atividade para exibir</p>
+        <small>${
+          state.tasks.length
+            ? "Ajuste os filtros para ver atividades."
+            : "Adicione atividades na aba Activities."
+        }</small>
+      </div>`;
+    lucide.createIcons();
+    return;
+  }
   const { min, max } = getRange(tasks.length ? tasks : state.tasks);
   const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
-  const pxPerDay = zoomConfig[compactZoom].pxPerDay;
+  const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale; // ← ALTERADO
   const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
   const months = getMonths(min, max);
 
-  const weeksHeader = renderCompactWeeksHeader(
-    min,
-    max,
-    pxPerDay,
-    timelineWidth
-  );
-  
-  const monthBands = renderCompactMonthBands(
-    months,
-    min,
-    max,
-    pxPerDay
-  );
+  const weeksHeader = renderCompactWeeksHeader(min, max, pxPerDay, timelineWidth);
+  const monthBands = renderCompactMonthBands(months, min, max, pxPerDay);
 
-  const monthColumns = months
-    .map((month, index) => {
-      const next = new Date(month);
-      next.setMonth(next.getMonth() + 1);
-
-      const days = Math.max(
-        1,
-        Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs)
-      );
-
-      return `
-        <div
-          class="month-cell"
-          style="width:${days * pxPerDay}px;grid-column:${index + 1}"
-        >
-          ${compactZoom === "quarter" ? quarterLabel(month) : monthLabel(month)}
-        </div>
-      `;
-    })
-    .join("");
+  const monthColumns = months.map((month, index) => {
+    const next = new Date(month);
+    next.setMonth(next.getMonth() + 1);
+    const days = Math.max(1, Math.round((Math.min(next, max) - Math.max(month, min)) / dayMs));
+    return `<div class="month-cell" style="width:${days * pxPerDay}px;grid-column:${index + 1}">
+      ${compactZoom === "quarter" ? quarterLabel(month) : monthLabel(month)}
+    </div>`;
+  }).join("");
 
   const grouped = new Map();
-
   tasks.forEach((task) => {
-    if (!grouped.has(task.component)) {
-      grouped.set(task.component, []);
-    }
-
+    if (!grouped.has(task.component)) grouped.set(task.component, []);
     grouped.get(task.component).push(task);
   });
 
   const rows = [];
-
   for (const [component, componentTasks] of grouped.entries()) {
     const lanes = packCompactTasks(componentTasks);
-
     rows.push(`
-      <div class="compact-component-label" style="height:${lanes.length * 32 + 20}px">
+      <div class="compact-component-label" style="height:${lanes.length * 32 + 20}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px">
         <strong>${escapeHtml(component)}</strong>
       </div>
-
-      <div
-        class="compact-component-lane"
-        style="width:${timelineWidth}px;height:${lanes.length * 32 + 20}px"
-      >
-      ${monthBands}
-        ${lanes
-          .flatMap((lane, laneIndex) =>
-            lane.map((task) => renderCompactBar(task, min, pxPerDay, laneIndex))
-          )
-          .join("")}
+      <div class="compact-component-lane" style="width:${timelineWidth}px;height:${lanes.length * 32 + 20}px">
+        ${monthBands}
+        ${lanes.flatMap((lane, laneIndex) => lane.map((task) => renderCompactBar(task, min, pxPerDay, laneIndex))).join("")}
       </div>
     `);
   }
 
+  const compactTitle = document.getElementById("compactProjectTitle");
+  const compactPeriod = document.getElementById("compactPeriodLabel");
+  if (compactTitle) compactTitle.textContent = state.projectName || "Timeline Compact";
+  if (compactPeriod) {
+    const fmt = d => new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(d);
+    compactPeriod.textContent = `${fmt(min)} — ${fmt(max)}`;
+  }
+  // ← ALTERADO: usa compactLabelColWidth no grid
   $("#compactTimeline").innerHTML = `
-    <div class="timeline-grid compact-grid">
-      <div class="timeline-corner">${tasks.length} activities</div>
-
-      <div
-        class="months"
-        style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px"
-      >
+    <div class="timeline-grid compact-grid" style="grid-template-columns:${compactLabelColWidth}px 1fr">
+      <div class="timeline-corner" style="min-width:${compactLabelColWidth}px">${tasks.length} activities</div>
+      <div class="months" style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px">
         ${monthColumns}
       </div>
-
       ${weeksHeader}
       ${rows.join("")}
     </div>
   `;
-//aqui
+
   $$(".compact-component-lane").forEach((lane) => {
-    lane.style.backgroundSize =
-      `${compactZoom === "week" ? 63 : compactZoom === "quarter" ? 252 : 126}px 100%`;
+    lane.style.backgroundSize = `${compactZoom === "week" ? 63 : compactZoom === "quarter" ? 252 : 126}px 100%`;
   });
+_compactExportWidth  = compactLabelColWidth + timelineWidth + 48;
+_compactExportHeight = (document.getElementById("compactTimeline")?.scrollHeight || 800) + 80;
+
   initCompactDragging();
-}
-
-async function exportCompactTimelinePng() {
-
-  const element =
-    document.getElementById(
-      "compactTimeline"
-    );
-
-  if (!element) return;
-
-  const canvas =
-    await html2canvas(element, {
-      backgroundColor: "#ffffff",
-      scale: 2,
-      useCORS: true,
-      logging: false
-    });
-
-  const link =
-    document.createElement("a");
-
-  link.download =
-    `timeline-compact-${
-      new Date()
-        .toISOString()
-        .slice(0,10)
-    }.png`;
-
-  link.href =
-    canvas.toDataURL(
-      "image/png"
-    );
-
-  link.click();
 }
 
 function packCompactTasks(tasks) {
@@ -1095,9 +1918,12 @@ function renderAll() {
   $("#projectName").value = state.projectName;
   $("#pageTitle").textContent = state.projectName || "Schedule Generator";
   renderFilters();
-  renderMetrics();
+  renderDashboard();
+  renderTeamView();
+  renderSettingsView();  
   renderLegend();
   renderBaselineSelector();
+  renderProjectSelector();
   refreshTimelineInteractions();
   renderCompactTimeline();
   renderTasksTable();
@@ -1156,10 +1982,7 @@ function updateField(collection, id, field, value) {
   
     const fieldName = field === "start" ? "Start" : "End";
 
-    showToast(
-      `${fieldName} locked by ${dependency.type} dependency`
-    );
-  
+    showToast(`${fieldName} locked by ${dependency.type} dependency`, "warning")
     renderAll();
     return;
   }
@@ -1171,26 +1994,28 @@ function updateField(collection, id, field, value) {
 }
 
 
-function showToast(message) {
-  const toast = document.createElement("div");
+function showToast(message, type = "") {
+  const iconMap = {
+    success: "check-circle",
+    error:   "x-circle",
+    warning: "alert-triangle",
+    info:    "info",
+    "":      "check-circle",
+  };
 
-  toast.className = "toast";
-  toast.textContent = message;
+  const toast = document.createElement("div");
+  toast.className = `toast${type ? ` toast-${type}` : ""}`;
+  toast.innerHTML = `
+    <i data-lucide="${iconMap[type] ?? "check-circle"}"></i>
+    <span>${escapeHtml(message)}</span>`;
 
   document.body.appendChild(toast);
+  lucide.createIcons({ nodes: [toast] });
 
-  // animação de entrada
-  setTimeout(() => {
-    toast.classList.add("show");
-  }, 10);
-
-  // remover depois
+  setTimeout(() => toast.classList.add("show"), 10);
   setTimeout(() => {
     toast.classList.remove("show");
-
-    setTimeout(() => {
-      toast.remove();
-    }, 300);
+    setTimeout(() => toast.remove(), 300);
   }, 2500);
 }
 
@@ -1674,7 +2499,21 @@ function updateDependencyType(successorId, type) {
   renderAll();
 }
 
+function validateRequired(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el) return true;
+  const valid = el.value.trim() !== "";
+  el.classList.toggle("input-error", !valid);
+  if (!valid) {
+    el.focus();
+    showToast("Campo obrigatório não preenchido", "error");
+  }
+  return valid;
+}
+
 function bindEvents() {
+
+  bindPngDialogEvents();
 
   document.addEventListener("click", (event) => {
     const componentHeader = event.target.closest(".collapsible-component");
@@ -1706,11 +2545,6 @@ $("#weeksToggle").addEventListener("change", () => {
   renderCompactTimeline();
 });
 
-$("#exportCompactPngButton")
-  ?.addEventListener(
-    "click",
-    exportCompactTimelinePng
-  );
 
 $$(".compact-label").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1784,14 +2618,19 @@ $$(".compact-zoom").forEach((button) => {
     }
   });
 
-  $$(".nav-tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      $$(".nav-tab").forEach((tab) => tab.classList.remove("active"));
-      $$(".view").forEach((view) => view.classList.remove("active"));
-      button.classList.add("active");
-      $(`#${button.dataset.view}View`).classList.add("active");
-    });
+$$(".nav-tab").forEach((button) => {
+  button.addEventListener("click", () => {
+    $$(".nav-tab").forEach((tab) => tab.classList.remove("active"));
+    $$(".view").forEach((view) => view.classList.remove("active"));
+    button.classList.add("active");
+
+    const viewId = `#${button.dataset.view}View`;
+    const target = $(viewId);
+    if (target) {
+      target.classList.add("active");
+    }
   });
+});
 
   $("#projectName").addEventListener("input", (event) => {
     state.projectName = event.target.value;
@@ -1906,26 +2745,21 @@ $$(".compact-zoom").forEach((button) => {
     renderAll();
   });
 
-  $("#resetButton").addEventListener("click", () => {
-    state = structuredClone(seed);
-    saveState();
-    renderAll();
-  });
-
   $("#importJsonButton").addEventListener("click", () => $("#importJsonInput").click());
-  $("#importJsonInput").addEventListener("change", async (event) => {
+ $("#importJsonInput").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       const imported = JSON.parse(await file.text());
-      if (!Array.isArray(imported.tasks) || !Array.isArray(imported.milestones) || !Array.isArray(imported.freeMilestones)) {
-        throw new Error("Invalid Schedule Studio file");
-      }
-      state = imported;
+      const isOldFormat = Array.isArray(imported.tasks) && Array.isArray(imported.milestones);
+      const isNewFormat = Array.isArray(imported.projects);
+      if (!isOldFormat && !isNewFormat) throw new Error("Formato inválido");
+      state = normalizeState(imported);
       saveState();
       renderAll();
+      showToast("Projeto importado com sucesso");
     } catch {
-      alert("This JSON file is not a valid Schedule Studio export.");
+      alert("Arquivo JSON inválido para o Schedule Studio.");
     } finally {
       event.target.value = "";
     }
@@ -1936,10 +2770,19 @@ $$(".compact-zoom").forEach((button) => {
     () =>
       download(
         "schedule-studio.json",
-        JSON.stringify(state, null, 2),
+        JSON.stringify(
+          {
+            activeProjectId: state.activeProjectId,
+            users:           state.users        ?? [],
+            projectUsers:    state.projectUsers ?? [],
+            projects:        state.projects
+          },
+          null, 2
+        ),
         "application/json"
       )
   );
+
   
   $("#exportCsvButton").addEventListener(
     "click",
@@ -1951,21 +2794,260 @@ $$(".compact-zoom").forEach((button) => {
       )
   );
   
-  $("#exportCompactPngButton")
-    ?.addEventListener(
-      "click",
-      exportCompactTimelinePng
-    );
+  // --- Drawer: Layout Settings ---
+  const layoutDrawer  = document.getElementById("layoutDrawer");
+  const drawerOverlay = document.getElementById("layoutDrawerOverlay");
+
+  function openLayoutDrawer() {
+    layoutDrawer.classList.add("open");
+    drawerOverlay.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeLayoutDrawer() {
+    layoutDrawer.classList.remove("open");
+    drawerOverlay.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  document.getElementById("layoutSettingsButton")
+    ?.addEventListener("click", openLayoutDrawer);
+
+  document.getElementById("closeLayoutDrawer")
+    ?.addEventListener("click", closeLayoutDrawer);
+
+  drawerOverlay?.addEventListener("click", closeLayoutDrawer);
+
+  // Sincroniza weeksToggleDrawer → weeksToggle (sidebar)
+  document.getElementById("weeksToggleDrawer")
+    ?.addEventListener("change", (e) => {
+      const main = document.getElementById("weeksToggle");
+      if (main) {
+        main.checked = e.target.checked;
+        main.dispatchEvent(new Event("change"));
+      }
+    });
+
+  // Fecha drawer com Escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && layoutDrawer?.classList.contains("open")) {
+      closeLayoutDrawer();
+    }
+  });
   
-  $("#alertsButton").addEventListener(
-    "click",
-    () => $("#alertsDialog").showModal()
-  );
-  
-  $("#closeAlertsButton").addEventListener(
-    "click",
-    () => $("#alertsDialog").close()
-  );
+  // Seletor de projeto (topbar)
+  document.getElementById("projectSelector")
+    ?.addEventListener("change", e => switchProject(e.target.value));
+
+  // Botão novo projeto
+  document.getElementById("newProjectButton")
+    ?.addEventListener("click", () => openProjectModal());
+
+  // Modal: fechar
+  document.getElementById("closeProjectModal")
+    ?.addEventListener("click", () => document.getElementById("projectModal").close());
+  document.getElementById("cancelProjectModal")
+    ?.addEventListener("click", () => document.getElementById("projectModal").close());
+
+  // Modal: salvar
+  document.getElementById("saveProjectModal")
+    ?.addEventListener("click", () => {
+      const id   = document.getElementById("projectModalId").value;
+      const name = document.getElementById("projectModalName").value.trim();
+      if (!validateRequired("projectModalName")) return;
+
+      const data = {
+        name,
+        client:    document.getElementById("projectModalClient").value.trim(),
+        manager:   document.getElementById("projectModalManager").value.trim(),
+        startDate: document.getElementById("projectModalStart").value,
+        endDate:   document.getElementById("projectModalEnd").value,
+        status:    document.getElementById("projectModalStatus").value,
+      };
+
+      if (id) { updateProject(id, data); }
+      else    { createProject(data);     }
+
+      document.getElementById("projectModal").close();
+    });
+
+  // Delegação: ações na tabela do dashboard
+  document.getElementById("dashboardProjectsTable")
+    ?.addEventListener("click", e => {
+      const switchBtn    = e.target.closest("[data-switch-project]");
+      const editBtn      = e.target.closest("[data-edit-project]");
+      const duplicateBtn = e.target.closest("[data-duplicate-project]");
+      const archiveBtn   = e.target.closest("[data-archive-project]");
+
+      if (archiveBtn) { archiveProject(archiveBtn.dataset.archiveProject); return; }
+      if (duplicateBtn) { duplicateProject(duplicateBtn.dataset.duplicateProject); return; }
+      if (editBtn) { openProjectModal(editBtn.dataset.editProject); return; }
+      if (switchBtn) { switchProject(switchBtn.dataset.switchProject); }
+    });
+
+  // Reset: recria seed com estrutura nova
+  // (o #resetButton já existe — SUBSTITUIR seu listener)
+  // REMOVER o listener original de #resetButton e usar este:
+  document.getElementById("resetButton")
+    ?.addEventListener("click", () => {
+      if (!confirm("Resetar para os dados de exemplo?")) return;
+      const id = crypto.randomUUID();
+      state = {
+        activeProjectId: id,
+        projects: [{
+          id, name: seed.projectName, client: "", manager: "",
+          startDate: "", endDate: "", status: "Active", createdAt: iso(new Date()),
+          tasks:          structuredClone(seed.tasks),
+          milestones:     structuredClone(seed.milestones),
+          freeMilestones: structuredClone(seed.freeMilestones),
+          dependencies:   structuredClone(seed.dependencies ?? [])
+        }]
+      };
+      syncFromActiveProject();
+      saveState();
+      renderAll();
+    });
+ // Botão adicionar membro
+  document.getElementById("addTeamMemberButton")
+    ?.addEventListener("click", () => {
+      const name = document.getElementById("teamMemberName").value;
+      const role = document.getElementById("teamMemberRole").value;
+      addTeamMember(name, role);
+      document.getElementById("teamMemberName").value = "";
+    });
+
+  // Enter no campo nome também adiciona
+  document.getElementById("teamMemberName")
+    ?.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        document.getElementById("addTeamMemberButton").click();
+      }
+    });
+
+  // Delegação: remover membro via botão nos cards
+  document.getElementById("teamCards")
+    ?.addEventListener("click", e => {
+      const btn = e.target.closest("[data-remove-member]");
+      if (btn) removeTeamMember(btn.dataset.removeMember);
+    });
+
+  // Settings: usuários
+  document.getElementById("addUserButton")
+    ?.addEventListener("click", () => openUserModal());
+
+  document.getElementById("closeUserModal")
+    ?.addEventListener("click", () => document.getElementById("userModal").close());
+  document.getElementById("cancelUserModal")
+    ?.addEventListener("click", () => document.getElementById("userModal").close());
+  document.getElementById("saveUserModal")
+    ?.addEventListener("click", saveUser);
+
+  // Enter no campo nome do userModal
+  document.getElementById("userModalNome")
+    ?.addEventListener("keydown", e => {
+      if (e.key === "Enter") document.getElementById("saveUserModal").click();
+    });
+
+  // Delegação: editar / remover usuário
+  document.getElementById("usersTable")
+    ?.addEventListener("click", e => {
+      const edit   = e.target.closest("[data-edit-user]");
+      const remove = e.target.closest("[data-delete-user]");
+      if (edit)   openUserModal(edit.dataset.editUser);
+      if (remove) removeUser(remove.dataset.deleteUser);
+    });
+
+  // Settings: vínculos projeto-usuário
+  document.getElementById("addProjectUserButton")
+    ?.addEventListener("click", () => {
+      const userId = document.getElementById("addProjectUserSelect").value;
+      const funcao = document.getElementById("addProjectUserFuncao").value;
+      addProjectUser(userId, funcao);
+    });
+
+  document.getElementById("projectUsersTable")
+    ?.addEventListener("click", e => {
+      const btn = e.target.closest("[data-remove-project-user]");
+      if (btn) removeProjectUser(btn.dataset.removeProjectUser);
+    });
+
+     // ── Alerts drawer ──────────────────────────────────────────
+  const alertsDrawer  = document.getElementById("alertsDrawer");
+  const alertsOverlay = document.getElementById("alertsDrawerOverlay");
+
+  function openAlertsDrawer() {
+    alertsDrawer?.classList.add("open");
+    alertsOverlay?.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeAlertsDrawer() {
+    alertsDrawer?.classList.remove("open");
+    alertsOverlay?.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  document.getElementById("alertsButton")
+    ?.addEventListener("click", openAlertsDrawer);
+
+  document.getElementById("closeAlertsDrawer")
+    ?.addEventListener("click", closeAlertsDrawer);
+
+  alertsOverlay?.addEventListener("click", closeAlertsDrawer);
+
+  // Fechar com Escape (listener separado do layoutDrawer)
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && alertsDrawer?.classList.contains("open")) {
+      closeAlertsDrawer();
+    }
+  });
+
+
+  // ── Export dropdown ────────────────────────────────────────
+  const exportDropBtn  = document.getElementById("exportDropdownButton");
+  const exportDropMenu = document.getElementById("exportDropdownMenu");
+  const exportDropWrap = exportDropBtn?.closest(".export-dropdown-wrap");
+
+  function openExportDropdown() {
+    exportDropMenu.hidden = false;
+    exportDropWrap?.classList.add("open");
+  }
+
+  function closeExportDropdown() {
+    if (exportDropMenu) exportDropMenu.hidden = true;
+    exportDropWrap?.classList.remove("open");
+  }
+
+  // Toggle ao clicar no botão
+  exportDropBtn?.addEventListener("click", e => {
+    e.stopPropagation(); // impede fechar imediatamente via document handler
+    exportDropMenu?.hidden ? openExportDropdown() : closeExportDropdown();
+  });
+
+  // Fechar ao clicar em qualquer item do menu
+  exportDropMenu?.addEventListener("click", closeExportDropdown);
+
+  // Fechar ao clicar fora do dropdown
+  document.addEventListener("click", e => {
+    if (exportDropWrap && !exportDropWrap.contains(e.target)) {
+      closeExportDropdown();
+    }
+  });
+
+  // Fechar dropdown com Escape
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !exportDropMenu?.hidden) {
+      closeExportDropdown();
+    }
+  });
+
+ document.addEventListener("focusin", e => {
+    if (e.target.matches("input, select, textarea")) {
+      e.target.classList.remove("input-error");
+    }
+  });
+
+
 }
 
 function toCsv(rows) {
@@ -1975,6 +3057,20 @@ function toCsv(rows) {
 
 function renderTimeline() {
   const tasks = getFilteredTasks().sort((a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start));
+    if (!tasks.length) {
+    $("#timeline").innerHTML = `
+      <div class="view-empty-state">
+        <i data-lucide="calendar-x-2"></i>
+        <p>Nenhuma atividade encontrada</p>
+        <small>${
+          state.tasks.length
+            ? "Ajuste os filtros para ver atividades."
+            : "Adicione atividades na aba Activities."
+        }</small>
+      </div>`;
+    lucide.createIcons();
+    return;
+  }
   const { min, max } = getRange(tasks.length ? tasks : state.tasks);
   const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
   const pxPerDay =  zoomConfig[zoom].pxPerDay;
@@ -2104,58 +3200,315 @@ function download(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
+function resolveAllColors(element) {
+  const allElements = element.querySelectorAll("*");
+  
+  allElements.forEach(el => {
+    const style = getComputedStyle(el);
+    
+    const colorProps = [
+      'color', 'background-color', 'border-color', 
+      'border-top-color', 'border-right-color', 
+      'border-bottom-color', 'border-left-color',
+      'box-shadow', 'text-shadow', 'outline-color'
+    ];
+
+    colorProps.forEach(prop => {
+      let value = style.getPropertyValue(prop);
+      if (!value) return;
+
+      // Resolve color-mix() e color()
+      if (value.includes('color-mix') || value.includes('color(')) {
+        const resolved = resolveColor(value);
+        if (resolved) {
+          el.style.setProperty(prop, resolved, 'important');
+        }
+      }
+    });
+  });
+}
+
+function resolveColor(val) {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    
+    ctx.fillStyle = val;
+    ctx.fillRect(0, 0, 1, 1);
+    
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    return a === 0 ? "transparent" : `rgb(${r},${g},${b})`;
+  } catch (e) {
+    console.warn("Failed to resolve color:", val);
+    return null;
+  }
+}
+
+/* ---------- estado do modal ---------- */
+let _pngFullCanvas = null; // canvas gerado em escala 2x (base)
+let _compactExportWidth = 0;
+let _compactExportHeight = 0;
+
 async function exportCompactTimelinePng() {
+  const exportArea = document.getElementById("presentationExportArea");
+  const dialog = document.getElementById("pngExportDialog");
+  const canvas = document.getElementById("pngPreviewCanvas");
+  const wrap = document.getElementById("pngPreviewWrap");
+  const hint = document.getElementById("pngSizeHint");
 
-  const element =
-    document.getElementById(
-      "presentationExportArea"
-    );
+  canvas.classList.remove("ready");
+  wrap.classList.add("loading");
+  hint.textContent = "Gerando preview de alta qualidade...";
 
-  if (!element) {
-    showToast(
-      "Presentation area not found"
-    );
-    return;
+  dialog.showModal();
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  try {
+    const fullW = _compactExportWidth || exportArea.scrollWidth + 60;
+    const fullH = _compactExportHeight || exportArea.scrollHeight + 120;
+
+    const clone = exportArea.cloneNode(true);
+    clone.style.cssText = `
+      position:absolute; top:-99999px; left:-99999px; 
+      width:${fullW}px; background:#ffffff; overflow:visible;
+      font-family: Inter, system-ui, sans-serif;
+      padding: 20px;
+    `;
+
+    // === APLICA MELHORIAS + RESOLVE CORES ===
+    applyExportEnhancements(clone);
+    resolveAllColors(clone);           // ← ESSA É A LINHA MAIS IMPORTANTE
+
+    document.body.appendChild(clone);
+
+    const quality = Number(document.getElementById("pngQualitySelect").value || 3);
+
+    _pngFullCanvas = await html2canvas(clone, {
+      scale: quality,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+      width: fullW,
+      height: fullH,
+      windowWidth: fullW + 200,
+      windowHeight: fullH + 200,
+      imageTimeout: 0,
+      removeContainer: true,
+    });
+
+ /*   const quality = Number(
+  document.getElementById("pngQualitySelect").value || 3
+);
+
+const renderScale = Math.min(
+  quality * window.devicePixelRatio,
+  4
+);
+*/
+    document.body.removeChild(clone);
+    wrap.classList.remove("loading");
+    canvas.classList.add("ready");
+
+    autoFitPngScale();
+
+  } catch (err) {
+    console.error(err);
+    showToast("Erro ao gerar PNG (problema de cor)");
+    wrap.classList.remove("loading");
+    dialog.close();
+  }
+}
+
+function applyExportEnhancements(clone) {
+  // Título
+  if (document.getElementById("pngIncludeTitle")?.checked) {
+    const title = document.createElement("div");
+    title.style.cssText = `
+      background: #0f172a; color: white; padding: 32px 40px 24px;
+      font-size: 24px; font-weight: 800; text-align: center;
+      border-bottom: 4px solid #1e40af; margin-bottom: 25px;
+      border-radius: 8px 8px 0 0;
+    `;
+    title.innerHTML = `
+      ${escapeHtml(state.projectName)}<br>
+      <small style="font-size:14px; opacity:0.85">
+        Timeline Compact • ${new Intl.DateTimeFormat('pt-BR', {dateStyle:'long'}).format(new Date())}
+      </small>
+    `;
+    clone.prepend(title);
   }
 
-  showToast(
-    "Generating image..."
-  );
+  // Modo Clean
+  if (document.getElementById("pngCleanMode")?.checked) {
+    clone.querySelectorAll(".compact-component-lane, .compact-weeks-row").forEach(el => {
+      el.style.backgroundImage = "none !important";
+    });
+  }
 
-  const canvas =
-    await html2canvas(
-      element,
-      {
-        backgroundColor: "#ffffff",
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        scrollX: 0,
-        scrollY: 0
-      }
-    );
+  // Melhorias visuais
+  clone.querySelectorAll(".compact-component-label").forEach(el => {
+    el.style.padding = "18px 22px";
+    el.style.fontSize = "15.5px";
+    el.style.borderBottom = "2px solid #cbd5e1";
+  });
 
-  const link =
-    document.createElement("a");
-
-  link.download =
-    `${state.projectName || "timeline"}-${
-      new Date()
-        .toISOString()
-        .slice(0, 10)
-    }.png`;
-
-  link.href =
-    canvas.toDataURL(
-      "image/png"
-    );
-
-  link.click();
-
-  showToast(
-    "PNG exported"
-  );
+  clone.querySelectorAll(".compact-bar").forEach(bar => {
+    bar.style.boxShadow = "0 4px 14px rgba(0,0,0,0.18)";
+    bar.style.border = "1px solid rgba(0,0,0,0.15)";
+  });
 }
+function enhancePngCanvas(sourceCanvas) {
+  const margin = 60;
+  const final = document.createElement("canvas");
+  final.width = sourceCanvas.width + margin * 2;
+  final.height = sourceCanvas.height + margin * 2;
+
+  const ctx = final.getContext("2d");
+
+  // Fundo branco com sombra suave
+  ctx.shadowColor = "rgba(0, 0, 0, 0.12)";
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 15;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, final.width, final.height);
+
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.drawImage(sourceCanvas, margin, margin);
+
+  return final;
+}
+
+
+/* ---------- redimensiona o canvas de preview ---------- */
+function applyPngScale(pct) {
+  if (!_pngFullCanvas) return;
+  const scale = pct / 100;
+  const outW = Math.round(_pngFullCanvas.width * scale);
+  const outH = Math.round(_pngFullCanvas.height * scale);
+
+  const preview = document.getElementById("pngPreviewCanvas");
+  preview.width = outW;
+  preview.height = outH;
+
+  const ctx = preview.getContext("2d");
+  ctx.clearRect(0, 0, outW, outH);
+  ctx.drawImage(_pngFullCanvas, 0, 0, outW, outH);
+
+  document.getElementById("pngSizeHint").textContent = `${outW} × ${outH} px`;
+}
+
+/* ---------- auto-fit: encontra a escala que cabe na área ---------- */
+function autoFitPngScale() {
+  if (!_pngFullCanvas) return;
+  const wrap = document.getElementById("pngPreviewWrap");
+  const maxW = wrap.clientWidth - 40;
+  const maxH = wrap.clientHeight - 40;
+
+  const scaleW = maxW / _pngFullCanvas.width;
+  const scaleH = maxH / _pngFullCanvas.height;
+  const best = Math.min(scaleW, scaleH, 1.0);
+
+  const pct = Math.max(20, Math.round(best * 100));
+  document.getElementById("pngScaleSlider").value = pct;
+  document.getElementById("pngScaleValue").textContent = `${pct}%`;
+  applyPngScale(pct);
+}
+
+/* ---------- faz o download no tamanho escolhido ---------- */
+function downloadPng() {
+  if (!_pngFullCanvas) return;
+
+  let canvasToDownload = _pngFullCanvas;
+
+  // Aplica melhorias finais
+  canvasToDownload = enhancePngCanvas(canvasToDownload);
+
+  const link = document.createElement("a");
+  link.download = `${state.projectName.replace(/[^a-z0-9]/gi, '_')}-timeline-compact.png`;
+  link.href = canvasToDownload.toDataURL("image/png", 0.95);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  document.getElementById("pngExportDialog").close();
+  showToast("PNG exportado com sucesso!");
+}
+
+/* ---------- eventos do modal (adicionar dentro de bindEvents()) ---------- */
+function bindPngDialogEvents() {
+  document.getElementById("exportCompactPngButton")?.addEventListener("click", exportCompactTimelinePng);
+
+  const scaleSlider = document.getElementById("pngScaleSlider");
+  if (scaleSlider) {
+    scaleSlider.addEventListener("input", () => {
+      const pct = Number(scaleSlider.value);
+      document.getElementById("pngScaleValue").textContent = `${pct}%`;
+      applyPngScale(pct);
+    });
+  }
+
+  document.getElementById("pngQualitySelect")?.addEventListener("change", () => {
+    // Opcional: regenerar preview quando mudar qualidade
+  });
+
+  document.getElementById("pngFitBtn")?.addEventListener("click", autoFitPngScale); // caso ainda exista
+  document.getElementById("pngPptBtn")?.addEventListener("click", fitToPptSlide);
+
+  document.getElementById("confirmPngButton").addEventListener("click", downloadPng);
+  document.getElementById("cancelPngButton").addEventListener("click", closePngDialog);
+  document.getElementById("closePngDialog").addEventListener("click", closePngDialog);
+
+  // Controles de layout compact (mantidos)
+  document.getElementById("compactLabelWidth")?.addEventListener("input", e => {
+    compactLabelColWidth = Number(e.target.value);
+    document.getElementById("compactLabelWidthValue").textContent = `${compactLabelColWidth}px`;
+    renderCompactTimeline();
+  });
+
+  document.getElementById("compactMonthWidth")?.addEventListener("input", e => {
+    compactMonthScale = Number(e.target.value) / 100;
+    document.getElementById("compactMonthWidthValue").textContent = `${e.target.value}%`;
+    renderCompactTimeline();
+  });
+}
+
+function closePngDialog() {
+  document.getElementById("pngExportDialog").close();
+  const canvas = document.getElementById("pngPreviewCanvas");
+  canvas.classList.remove("ready");
+  _pngFullCanvas = null;
+}
+
+// Converte "color(display-p3 r g b)" ou "color(srgb r g b)" para hex via Canvas 2D
+function resolveColor(val) {
+  // resolve color() e color-mix() para rgb() via canvas 1×1
+  try {
+    const c = document.createElement("canvas");
+    c.width = c.height = 1;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = val;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    return a === 0 ? "transparent" : `rgb(${r},${g},${b})`;
+  } catch { return null; }
+}
+
+function fitToPptSlide() {
+  if (!_pngFullCanvas) return;
+  const targetW = 1500;
+  const pct = Math.round((targetW / _pngFullCanvas.width) * 100);
+  const clamped = Math.max(20, Math.min(200, pct));
+  document.getElementById("pngScaleSlider").value = clamped;
+  document.getElementById("pngScaleValue").textContent = `${clamped}%`;
+  applyPngScale(clamped);
+}
+
+// mantém fallbackColor como alias para não quebrar nada
+const fallbackColor = resolveColor;
 
 function escapeHtml(value) {
   return String(value ?? "")
