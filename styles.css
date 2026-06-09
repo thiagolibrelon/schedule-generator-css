@@ -2063,4 +2063,4 @@ tr:hover .project-row-actions { opacity: 1; }
 @media (max-width: 900px) {
   .png-export-controls { flex-direction: column; }
   .png-controls-right { width: 100%; }
-} 
+}
