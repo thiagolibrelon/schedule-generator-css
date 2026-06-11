@@ -1758,6 +1758,64 @@ function renderCompactMonthBands(months, min, max, pxPerDay) {
     .join("");
 }
 
+function renderCompactYearRow(min, max, pxPerDay, timelineWidth) {
+  const segs = [];
+  for (let y = min.getFullYear(); y <= max.getFullYear(); y++) {
+    const yStart = new Date(Math.max(new Date(y, 0, 1), min));
+    const yEnd   = new Date(Math.min(new Date(y, 11, 31), max));
+    const left   = ((yStart - min) / dayMs) * pxPerDay;
+    const width  = (Math.round((yEnd - yStart) / dayMs) + 1) * pxPerDay;
+    segs.push(`<div class="compact-year-cell" style="left:${left}px;width:${width}px">${y}</div>`);
+  }
+  return `
+    <div class="timeline-corner compact-year-corner"></div>
+    <div class="compact-years-row" style="width:${timelineWidth}px">${segs.join("")}</div>`;
+}
+
+const projectMilestoneColors = ["#4a5aa6", "#147c73", "#b87900", "#c74444"];
+
+function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight) {
+  const items = state.milestones.filter(m => m.start);
+  if (!items.length) return "";
+
+  const markers = items.map((item, index) => {
+    const color = projectMilestoneColors[item.color] || projectMilestoneColors[index % projectMilestoneColors.length];
+    const left  = ((dateValue(item.start) - min) / dayMs) * pxPerDay;
+    const tip   = `${escapeAttr(item.name)} · ${formatDate(item.start)}${item.end ? " - " + formatDate(item.end) : ""}`;
+
+    // Phase → bloco igual às atividades
+    if (item.type === "Phase" && item.end) {
+      const width = Math.max(28, daysBetween(item.start, item.end) * pxPerDay);
+      return `
+        <div class="compact-ms-phase compact-ms-draggable"
+          data-compact-ms-id="${item.id}"
+          title="${tip}"
+          style="left:${left}px;width:${width}px;--ms:${color}"
+        >${escapeHtml(item.name)}</div>`;
+    }
+
+    // Main Milestone → label + linha tracejada que atravessa as atividades
+    if (item.type === "Main Milestone") {
+      return `
+        <div class="compact-ms-label compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;color:${color}">${escapeHtml(item.name)}</div>
+        <div class="compact-ms-mainline" style="left:${left}px;height:${24 + bodyHeight}px;--ms:${color}"></div>
+        <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;--ms:${color}"></div>`;
+    }
+
+    // Milestone → triângulo
+    return `
+      <div class="compact-ms-label compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;color:${color}">${escapeHtml(item.name)}</div>
+      <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;--ms:${color}"></div>`;
+  }).join("");
+
+  return `
+    <div class="timeline-corner compact-ms-corner">Milestones</div>
+    <div class="compact-milestones-lane" style="width:${timelineWidth}px">
+      ${monthBands}
+      ${markers}
+    </div>`;
+}
+
 function renderCompactTimeline() {
   const tasks = getFilteredTasks().sort(
     (a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start)
@@ -1802,18 +1860,24 @@ function renderCompactTimeline() {
   });
 
   const rows = [];
+  let bodyHeight = 0; // altura total das lanes de atividades (p/ linha do Main Milestone)
   for (const [component, componentTasks] of grouped.entries()) {
     const lanes = packCompactTasks(componentTasks);
+    const rowHeight = lanes.length * 32 + 20;
+    bodyHeight += rowHeight + 1; // +1 = border-bottom
     rows.push(`
-      <div class="compact-component-label" style="height:${lanes.length * 32 + 20}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px">
+      <div class="compact-component-label" style="height:${rowHeight}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px">
         <strong>${escapeHtml(component)}</strong>
       </div>
-      <div class="compact-component-lane" style="width:${timelineWidth}px;height:${lanes.length * 32 + 20}px">
+      <div class="compact-component-lane" style="width:${timelineWidth}px;height:${rowHeight}px">
         ${monthBands}
         ${lanes.flatMap((lane, laneIndex) => lane.map((task) => renderCompactBar(task, min, pxPerDay, laneIndex))).join("")}
       </div>
     `);
   }
+
+  const yearRow        = renderCompactYearRow(min, max, pxPerDay, timelineWidth);
+  const milestonesLane = renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight);
 
   const compactTitle = document.getElementById("compactProjectTitle");
   const compactPeriod = document.getElementById("compactPeriodLabel");
@@ -1825,11 +1889,13 @@ function renderCompactTimeline() {
   // ← ALTERADO: usa compactLabelColWidth no grid
   $("#compactTimeline").innerHTML = `
     <div class="timeline-grid compact-grid" style="grid-template-columns:${compactLabelColWidth}px 1fr">
+      ${yearRow}
       <div class="timeline-corner" style="min-width:${compactLabelColWidth}px">${tasks.length} activities</div>
       <div class="months" style="grid-template-columns:repeat(${months.length}, auto);width:${timelineWidth}px">
         ${monthColumns}
       </div>
       ${weeksHeader}
+      ${milestonesLane}
       ${rows.join("")}
     </div>
   `;
@@ -2150,6 +2216,19 @@ function initCompactDragging() {
   document.querySelectorAll(".compact-draggable-bar").forEach((bar) => {
     bar.onmousedown = startCompactDrag;
   });
+  document.querySelectorAll(".compact-ms-draggable").forEach((el) => {
+    el.onmousedown = startCompactMsDrag;
+  });
+}
+
+function startCompactMsDrag(event) {
+  event.preventDefault();
+  compactMsDragState = {
+    id: event.currentTarget.dataset.compactMsId,
+    startX: event.clientX,
+  };
+  commitState();
+  document.body.classList.add("dragging");
 }
 
 function startCompactDrag(event) {
@@ -2217,8 +2296,36 @@ function shiftTask(task, days) {
 }
 
 document.addEventListener("mousemove", (event) => {
+  if (compactMsDragState) {
+    const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
+
+    const deltaPx = event.clientX - compactMsDragState.startX;
+    const deltaDays = getSnappedDeltaDays(deltaPx, pxPerDay, compactZoom);
+
+    if (!deltaDays) return;
+
+    const item = state.milestones.find((m) => m.id === compactMsDragState.id);
+    if (!item || !item.start) return;
+
+    const start = dateValue(item.start);
+    start.setDate(start.getDate() + deltaDays);
+    item.start = iso(start);
+
+    if (item.end) {
+      const end = dateValue(item.end);
+      end.setDate(end.getDate() + deltaDays);
+      item.end = iso(end);
+    }
+
+    compactMsDragState.startX += deltaDays * pxPerDay;
+
+    saveState();
+    renderCompactTimeline();
+    return;
+  }
+
   if (compactDragState) {
-    const pxPerDay = zoomConfig[compactZoom].pxPerDay;
+    const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale; // FIX: respeita escala
   
     const deltaPx =
       event.clientX - compactDragState.startX;
@@ -2387,12 +2494,14 @@ document.addEventListener("mouseup", () => {
   dragState ||
   resizeState ||
   milestoneDragState ||
-  compactDragState;
+  compactDragState ||
+  compactMsDragState;
 
   dragState = null;
   resizeState = null;
   milestoneDragState = null;
   compactDragState = null;
+  compactMsDragState = null;
 
   document.body.classList.remove("dragging");
 
@@ -3525,6 +3634,7 @@ let dragState = null;
 let resizeState = null;
 let milestoneDragState = null;
 let compactDragState = null;
+let compactMsDragState = null;
 
 
 bindEvents();

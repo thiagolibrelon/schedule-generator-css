@@ -891,6 +891,127 @@ dialog::backdrop { background: rgba(32,33,36,.32); }
 .compact-bar { z-index: 2; }
 .compact-component-lane { overflow: hidden; }
 
+/* ─────────────────────────────────────────
+   COMPACT — YEAR ROW
+───────────────────────────────────────── */
+.compact-years-row {
+  position: relative;
+  min-height: 26px;
+  background: var(--charcoal);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.compact-year-cell {
+  position: absolute;
+  top: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  border-left: 1px dashed rgba(255,255,255,.35);
+}
+
+.compact-year-cell:first-child { border-left: none; }
+
+.compact-year-corner {
+  min-height: 26px;
+  background: var(--charcoal);
+}
+
+/* ─────────────────────────────────────────
+   COMPACT — PROJECT MILESTONES LANE
+───────────────────────────────────────── */
+.compact-ms-corner {
+  min-height: 46px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.compact-milestones-lane {
+  position: relative;
+  min-height: 46px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  overflow: visible;        /* permite a linha do Main Milestone descer */
+  z-index: 5;               /* pinta acima das lanes de atividades */
+}
+
+/* Nome do marco (acima do marcador) */
+.compact-ms-label {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: grab;
+  z-index: 6;
+  user-select: none;
+}
+
+/* Milestone / Main Milestone — triângulo ▼ */
+.compact-ms-triangle {
+  position: absolute;
+  top: 21px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 14px solid var(--ms);
+  filter: drop-shadow(0 1px 2px rgba(32,33,36,.3));
+  cursor: grab;
+  z-index: 6;
+}
+
+/* Main Milestone — linha tracejada que atravessa as atividades */
+.compact-ms-mainline {
+  position: absolute;
+  top: 21px;
+  width: 0;
+  transform: translateX(-50%);
+  border-left: 2px dashed var(--ms);
+  opacity: .75;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Phase — bloco igual às atividades */
+.compact-ms-phase {
+  position: absolute;
+  top: 14px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ms) 72%, #000);
+  background: var(--ms);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(32,33,36,.12);
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+  z-index: 6;
+  user-select: none;
+}
+
+body.dragging .compact-ms-label,
+body.dragging .compact-ms-triangle,
+body.dragging .compact-ms-phase { cursor: grabbing; }
+
+/* Coluna sticky precisa ficar acima da lane de milestones */
+.compact-grid .timeline-corner,
+.compact-grid .compact-component-label { z-index: 8; }
+
 .compact-control-group {
   display: flex;
   align-items: center;
