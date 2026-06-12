@@ -70,6 +70,14 @@ const statusMeta = {
   "": { color: "#6f7885", soft: "#e7ebf0", text: "#303640" },
 };
 
+// Escurece uma cor hex (fator 0-1, onde 0 = preto)
+function darkenHex(hex, factor = 0.72) {
+  const m = hex.match(/\w\w/g);
+  if (!m) return "#444";
+  const [r, g, b] = m.map(c => Math.round(parseInt(c, 16) * factor));
+  return `#${[r, g, b].map(c => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
 const appShell = document.querySelector(".app-shell");
 
 // Sidebar inicia RECOLHIDA por padrão (Etapa 1)
@@ -1432,6 +1440,7 @@ function renderTaskLane(task, min, pxPerDay, width) {
         left:${left}px;
         width:${barWidth}px;
         --bar:${meta.color};
+        --bar-border:${darkenHex(meta.color)};
         --bar-soft:${meta.soft};
         --bar-text:${meta.text}
       "
@@ -1783,29 +1792,26 @@ function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, b
     const left  = ((dateValue(item.start) - min) / dayMs) * pxPerDay;
     const tip   = `${escapeAttr(item.name)} · ${formatDate(item.start)}${item.end ? " - " + formatDate(item.end) : ""}`;
 
-    // Phase → bloco igual às atividades
     if (item.type === "Phase" && item.end) {
       const width = Math.max(28, daysBetween(item.start, item.end) * pxPerDay);
       return `
         <div class="compact-ms-phase compact-ms-draggable"
           data-compact-ms-id="${item.id}"
           title="${tip}"
-          style="left:${left}px;width:${width}px;--ms:${color}"
+          style="left:${left}px;width:${width}px;--ms:${color};--ms-border:${darkenHex(color)}"
         >${escapeHtml(item.name)}</div>`;
     }
 
-    // Main Milestone → label + linha tracejada que atravessa as atividades
     if (item.type === "Main Milestone") {
       return `
         <div class="compact-ms-label compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;color:${color}">${escapeHtml(item.name)}</div>
-        <div class="compact-ms-mainline" style="left:${left}px;height:${24 + bodyHeight}px;--ms:${color}"></div>
-        <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;--ms:${color}"></div>`;
+        <div class="compact-ms-mainline" style="left:${left}px;height:${24 + bodyHeight}px;border-color:${color}"></div>
+        <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;border-top-color:${color}"></div>`;
     }
 
-    // Milestone → triângulo
     return `
       <div class="compact-ms-label compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;color:${color}">${escapeHtml(item.name)}</div>
-      <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;--ms:${color}"></div>`;
+      <div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${item.id}" title="${tip}" style="left:${left}px;border-top-color:${color}"></div>`;
   }).join("");
 
   return `
@@ -1837,7 +1843,7 @@ function renderCompactTimeline() {
   }
   const { min, max } = getRange(tasks.length ? tasks : state.tasks);
   const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
-  const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale; // ← ALTERADO
+  const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
   const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
   const months = getMonths(min, max);
 
@@ -1860,11 +1866,11 @@ function renderCompactTimeline() {
   });
 
   const rows = [];
-  let bodyHeight = 0; // altura total das lanes de atividades (p/ linha do Main Milestone)
+  let bodyHeight = 0;
   for (const [component, componentTasks] of grouped.entries()) {
     const lanes = packCompactTasks(componentTasks);
     const rowHeight = lanes.length * 32 + 20;
-    bodyHeight += rowHeight + 1; // +1 = border-bottom
+    bodyHeight += rowHeight + 1;
     rows.push(`
       <div class="compact-component-label" style="height:${rowHeight}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px">
         <strong>${escapeHtml(component)}</strong>
@@ -1886,7 +1892,6 @@ function renderCompactTimeline() {
     const fmt = d => new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(d);
     compactPeriod.textContent = `${fmt(min)} — ${fmt(max)}`;
   }
-  // ← ALTERADO: usa compactLabelColWidth no grid
   $("#compactTimeline").innerHTML = `
     <div class="timeline-grid compact-grid" style="grid-template-columns:${compactLabelColWidth}px 1fr">
       ${yearRow}
@@ -1971,6 +1976,7 @@ function renderCompactBar(task, min, pxPerDay, laneIndex) {
         top:${10 + laneIndex * 32}px;
         width:${width}px;
         --bar:${meta.color};
+        --bar-border:${darkenHex(meta.color)};
         --bar-soft:${meta.soft};
         --bar-text:${meta.text};
       "
@@ -2298,10 +2304,8 @@ function shiftTask(task, days) {
 document.addEventListener("mousemove", (event) => {
   if (compactMsDragState) {
     const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
-
     const deltaPx = event.clientX - compactMsDragState.startX;
     const deltaDays = getSnappedDeltaDays(deltaPx, pxPerDay, compactZoom);
-
     if (!deltaDays) return;
 
     const item = state.milestones.find((m) => m.id === compactMsDragState.id);
@@ -2318,14 +2322,13 @@ document.addEventListener("mousemove", (event) => {
     }
 
     compactMsDragState.startX += deltaDays * pxPerDay;
-
     saveState();
     renderCompactTimeline();
     return;
   }
 
   if (compactDragState) {
-    const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale; // FIX: respeita escala
+    const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
   
     const deltaPx =
       event.clientX - compactDragState.startX;
@@ -3311,29 +3314,42 @@ function download(filename, content, type) {
 
 function resolveAllColors(element) {
   const allElements = element.querySelectorAll("*");
-  
+  const modernColorFns = /(color-mix|color\(|oklch|oklab|lab\(|lch\(|hwb\()/i;
+
+  const colorProps = [
+    'color', 'background-color', 'border-color',
+    'border-top-color', 'border-right-color',
+    'border-bottom-color', 'border-left-color',
+    'outline-color', 'text-decoration-color'
+  ];
+
   allElements.forEach(el => {
-    const style = getComputedStyle(el);
-    
-    const colorProps = [
-      'color', 'background-color', 'border-color', 
-      'border-top-color', 'border-right-color', 
-      'border-bottom-color', 'border-left-color',
-      'box-shadow', 'text-shadow', 'outline-color'
-    ];
+    let style;
+    try { style = getComputedStyle(el); } catch { return; }
 
     colorProps.forEach(prop => {
-      let value = style.getPropertyValue(prop);
-      if (!value) return;
+      const value = style.getPropertyValue(prop);
+      if (!value || !modernColorFns.test(value)) return;
 
-      // Resolve color-mix() e color()
-      if (value.includes('color-mix') || value.includes('color(')) {
-        const resolved = resolveColor(value);
-        if (resolved) {
-          el.style.setProperty(prop, resolved, 'important');
-        }
+      const resolved = resolveColor(value);
+      if (resolved) {
+        try { el.style.setProperty(prop, resolved, 'important'); } catch {}
+      } else {
+        try { el.style.setProperty(prop, '#999', 'important'); } catch {}
       }
     });
+
+    ['box-shadow', 'text-shadow'].forEach(prop => {
+      const value = style.getPropertyValue(prop);
+      if (value && modernColorFns.test(value)) {
+        try { el.style.setProperty(prop, 'none', 'important'); } catch {}
+      }
+    });
+
+    const filter = style.getPropertyValue('filter');
+    if (filter && filter !== 'none') {
+      try { el.style.setProperty('filter', 'none', 'important'); } catch {}
+    }
   });
 }
 
@@ -3424,7 +3440,7 @@ const renderScale = Math.min(
 
   } catch (err) {
     console.error(err);
-    showToast("Erro ao gerar PNG (problema de cor)");
+    showToast(`Erro ao gerar PNG: ${err?.message || err}`, "error");
     wrap.classList.remove("loading");
     dialog.close();
   }
