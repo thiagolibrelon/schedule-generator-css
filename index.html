@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Schedule Studio</title>
+    <title>Stellantis · Schedule Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -13,10 +13,10 @@
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">SG</div>
+          <div class="brand-mark">ST</div>
           <div class="brand-text">
             <strong>Schedule Studio</strong>
-            <span>Timeline generator</span>
+            <span>Stellantis · Timeline</span>
           </div>
         </div>
 
@@ -26,18 +26,17 @@
         </button>
 
         <nav class="nav-tabs" aria-label="Views">
-          <!-- FIX: active adicionado ao Dashboard (era ausente) -->
           <button class="nav-tab active" data-view="dashboard" title="Dashboard">
             <i data-lucide="layout-dashboard"></i>
             <span class="nav-label">Dashboard</span>
           </button>
-          <button class="nav-tab" data-view="timeline" title="Timeline">
+          <button class="nav-tab" data-view="compact" title="Timeline">
             <i data-lucide="gantt-chart-square"></i>
             <span class="nav-label">Timeline</span>
           </button>
-          <button class="nav-tab" data-view="compact" title="Timeline Compact">
-            <i data-lucide="panel-top"></i>
-            <span class="nav-label">Timeline Compact</span>
+          <button class="nav-tab" data-view="timeline" title="Project Management">
+            <i data-lucide="bar-chart-2"></i>
+            <span class="nav-label">Project Management</span>
           </button>
           <button class="nav-tab" data-view="activities" title="Activities">
             <i data-lucide="table-2"></i>
@@ -220,12 +219,12 @@
           </div>
         </section>
 
-        <!-- VIEW: Timeline Compact -->
+        <!-- VIEW: Timeline (was Compact) -->
         <section class="view" id="compactView">
           <div class="compact-topbar">
             <div class="compact-topbar-left">
-              <p class="eyebrow">Presentation view</p>
-              <h2 id="compactProjectTitle">Timeline Compact</h2>
+              <p class="eyebrow">Timeline</p>
+              <h2 id="compactProjectTitle">Timeline</h2>
               <span class="compact-period" id="compactPeriodLabel"></span>
             </div>
             <div class="compact-topbar-right">
@@ -235,6 +234,7 @@
               </button>
             </div>
           </div>
+          <div class="legend" id="compactLegend" style="margin-bottom:10px"></div>
           <div id="presentationExportArea">
             <div class="timeline-frame">
               <div class="timeline compact-timeline" id="compactTimeline"></div>
@@ -326,31 +326,15 @@
 
         <!-- VIEW: Milestones -->
         <section class="view" id="milestonesView">
-          <div class="split">
-            <div>
-              <div class="section-head">
-                <div><h2>Project milestones</h2></div>
-                <button class="primary-button" id="addMilestoneButton">
-                  <i data-lucide="plus"></i>
-                  Milestone
-                </button>
-              </div>
-              <div class="table-wrap">
-                <table id="milestonesTable"></table>
-              </div>
-            </div>
-            <div>
-              <div class="section-head">
-                <div><h2>Free milestones</h2></div>
-                <button class="primary-button" id="addFreeMilestoneButton">
-                  <i data-lucide="plus"></i>
-                  Marker
-                </button>
-              </div>
-              <div class="table-wrap">
-                <table id="freeMilestonesTable"></table>
-              </div>
-            </div>
+          <div class="section-head">
+            <div><h2>Project Milestones</h2></div>
+            <button class="primary-button" id="addMilestoneButton">
+              <i data-lucide="plus"></i>
+              Milestone
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table id="milestonesTable"></table>
           </div>
         </section>
 
@@ -596,6 +580,13 @@
               <span>Project title</span>
               <label class="switch">
                 <input type="checkbox" id="pngIncludeTitle" checked />
+                <span></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span>Legend</span>
+              <label class="switch">
+                <input type="checkbox" id="pngIncludeLegend" checked />
                 <span></span>
               </label>
             </div>

@@ -168,12 +168,18 @@ function normalizeState(raw) {
     p.endDate        ??= "";
     p.createdAt      ??= iso(new Date());
 
-    // Baseline migration (Etapa 1)
+    // Baseline migration
     p.tasks.forEach(task => {
       task.baselines ??= [];
       if (!task.baselines.length) {
         task.baselines.push({ id: "v1", start: task.start, end: task.end });
       }
+    });
+
+    // Milestone component/description fields migration
+    p.milestones.forEach(m => {
+      m.component   ??= "";
+      m.description ??= "";
     });
   });
 
@@ -276,6 +282,27 @@ function commitState() {
   }
 
   history.redoStack = [];
+}
+
+let _renderDebounceTimer = null;
+let _commitDebounced     = false;
+
+// Debounced commit: creates at most one undo point per 800 ms burst of edits.
+function commitStateDebounced() {
+  if (_commitDebounced) return;
+  commitState();
+  _commitDebounced = true;
+  setTimeout(() => { _commitDebounced = false; }, 800);
+}
+
+// Defers renderAll() by 600 ms so rapid field changes (e.g. typing a year in
+// a date input) don't destroy the active DOM element mid-edit.
+function scheduleRender() {
+  clearTimeout(_renderDebounceTimer);
+  _renderDebounceTimer = setTimeout(() => {
+    _renderDebounceTimer = null;
+    renderAll();
+  }, 600);
 }
 
 function undo() {
@@ -1164,9 +1191,12 @@ function renderFilters() {
 
 function renderLegend() {
   const statuses = ["On time", "Attention point", "Delayed", "Concluded", "Concluded with a delay"];
-  $("#legend").innerHTML = $("#legendToggle").checked
+  const html = $("#legendToggle").checked
     ? statuses.map((status) => `<span class="legend-item"><span class="dot" style="--dot:${statusMeta[status].color}"></span>${status}</span>`).join("")
     : "";
+  $("#legend").innerHTML = html;
+  const compactLegend = $("#compactLegend");
+  if (compactLegend) compactLegend.innerHTML = html;
 }
 
 function renderDependencyLines(tasks, rowPositions, min, pxPerDay, timelineWidth) {
@@ -1498,10 +1528,11 @@ function getSnappedDeltaDays(deltaPx, pxPerDay, targetZoom = zoom) {
 
 function renderMilestones(min, pxPerDay) {
   return state.milestones
+    .filter(item => !item.component)
     .map((item, index) => {
       if (!item.start) return "";
       const left = ((dateValue(item.start) - min) / dayMs) * pxPerDay;
-      const colors = ["#4a5aa6", "#147c73", "#b87900", "#c74444"];
+      const colors = ["#4a5aa6", "#243782", "#b87900", "#c74444"];
       return `<span class="marker draggable-milestone" data-milestone-id="${item.id}" data-milestone-type="project" style="left:${left}px;top:${20 + Number(item.level || 0) * 16}px;--marker:${colors[item.color] || colors[index % colors.length]}"></span>
       <span class="milestone-label" style="left:${left}px;top:${2 + Number(item.level || 0) * 16}px">${escapeHtml(item.name)}</span>`;
     })
@@ -1585,33 +1616,31 @@ table.innerHTML = `
 }
 
 function renderMilestoneTables() {
-  $("#milestonesTable").innerHTML = `<thead><tr><th>Name</th><th>Type</th><th>Initial</th><th>Final</th><th>Level</th><th></th></tr></thead><tbody>${state.milestones
-    .map(
-      (item) => `<tr data-id="${item.id}">
-      <td>${tableInput(item.name, "text", 'data-ms-field="name"')}</td>
-      <td>${tableSelect(item.type, ["Main Milestone", "Milestone", "Phase"], 'data-ms-field="type"')}</td>
-      <td>${tableInput(item.start, "date", 'data-ms-field="start"')}</td>
-      <td>${tableInput(item.end, "date", 'data-ms-field="end"')}</td>
-      <td>${tableInput(item.level ?? 0, "number", 'min="0" max="10" data-ms-field="level"')}</td>
-      <td><button class="row-action" data-delete-ms="${item.id}" title="Delete"><i data-lucide="trash-2"></i></button></td>
-    </tr>`,
-    )
-    .join("")}</tbody>`;
+  const componentOptions = ["", ...new Set(state.tasks.map(t => t.component).filter(Boolean))];
 
-  const components = [...new Set(state.tasks.map((task) => task.component))];
-  const statuses = ["Attention point", "Concluded", "Concluded Delay", "Delayed", "Ontime"];
-  $("#freeMilestonesTable").innerHTML = `<thead><tr><th>Name</th><th>Status</th><th>Date</th><th>Component</th><th>Level</th><th></th></tr></thead><tbody>${state.freeMilestones
-    .map(
-      (item) => `<tr data-id="${item.id}">
-      <td>${tableInput(item.name, "text", 'data-free-field="name"')}</td>
-      <td>${tableSelect(item.status, statuses, 'data-free-field="status"')}</td>
-      <td>${tableInput(item.date, "date", 'data-free-field="date"')}</td>
-      <td>${tableSelect(item.component, components, 'data-free-field="component"')}</td>
-      <td>${tableInput(item.level ?? 0, "number", 'min="0" max="10" data-free-field="level"')}</td>
-      <td><button class="row-action" data-delete-free="${item.id}" title="Delete"><i data-lucide="trash-2"></i></button></td>
-    </tr>`,
-    )
-    .join("")}</tbody>`;
+  const rows = state.milestones.length
+    ? state.milestones.map(item => `<tr data-id="${item.id}">
+        <td>${tableInput(item.name, "text", 'data-ms-field="name"')}</td>
+        <td>${tableSelect(item.type, ["Main Milestone", "Milestone", "Phase"], 'data-ms-field="type"')}</td>
+        <td>${tableInput(item.start, "date", 'data-ms-field="start"')}</td>
+        <td>${tableInput(item.end, "date", 'data-ms-field="end"')}</td>
+        <td>${tableSelect(item.component || "", componentOptions, 'data-ms-field="component"')}</td>
+        <td>${tableInput(item.description || "", "text", 'placeholder="Optional description" data-ms-field="description"')}</td>
+        <td>${tableInput(item.level ?? 0, "number", 'min="0" max="10" data-ms-field="level"')}</td>
+        <td><button class="row-action" data-delete-ms="${item.id}" title="Delete"><i data-lucide="trash-2"></i></button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8"><div class="view-empty-state" style="padding:24px">
+        <i data-lucide="milestone"></i>
+        <p>No milestones yet</p>
+        <small>Click "+ Milestone" to add one.</small>
+      </div></td></tr>`;
+
+  $("#milestonesTable").innerHTML = `
+    <thead><tr>
+      <th>Name</th><th>Type</th><th>Start</th><th>End</th>
+      <th>Component</th><th>Description</th><th>Level</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>`;
 }
 
 function getAlerts() {
@@ -1784,7 +1813,7 @@ function renderCompactYearRow(min, max, pxPerDay, timelineWidth) {
 const projectMilestoneColors = ["#4a5aa6", "#147c73", "#b87900", "#c74444"];
 
 function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight) {
-  const items = state.milestones.filter(m => m.start);
+  const items = state.milestones.filter(m => m.start && !m.component);
   if (!items.length) return "";
 
   const markers = items.map((item, index) => {
@@ -1871,12 +1900,25 @@ function renderCompactTimeline() {
     const lanes = packCompactTasks(componentTasks);
     const rowHeight = lanes.length * 32 + 20;
     bodyHeight += rowHeight + 1;
+    const labelFontSize = Math.round(Math.max(9, Math.min(15, compactLabelColWidth / 20)));
+
+    const compactComponentMilestones = state.milestones
+      .filter(m => m.component === component && m.start)
+      .map((m, idx) => {
+        const left = ((dateValue(m.start) - min) / dayMs) * pxPerDay;
+        const colors = ["#4a5aa6", "#243782", "#b87900", "#c74444"];
+        const color = colors[m.color] || colors[idx % colors.length];
+        const tip = `${escapeAttr(m.name)} · ${formatDate(m.start)}`;
+        return `<div class="compact-ms-triangle compact-ms-draggable" data-compact-ms-id="${m.id}" title="${tip}" style="left:${left}px;top:4px;border-top-color:${color}"></div>`;
+      }).join("");
+
     rows.push(`
-      <div class="compact-component-label" style="height:${rowHeight}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px">
+      <div class="compact-component-label" style="height:${rowHeight}px;width:${compactLabelColWidth}px;min-width:${compactLabelColWidth}px;font-size:${labelFontSize}px">
         <strong>${escapeHtml(component)}</strong>
       </div>
       <div class="compact-component-lane" style="width:${timelineWidth}px;height:${rowHeight}px">
         ${monthBands}
+        ${compactComponentMilestones}
         ${lanes.flatMap((lane, laneIndex) => lane.map((task) => renderCompactBar(task, min, pxPerDay, laneIndex))).join("")}
       </div>
     `);
@@ -1966,11 +2008,16 @@ function renderCompactBar(task, min, pxPerDay, laneIndex) {
   const width =
     Math.max(28, daysBetween(task.start, task.end) * pxPerDay);
 
-    return `
+  const isNarrow = width < 56;
+
+  return `
     <div
-      class="compact-bar compact-draggable-bar"
+      class="compact-bar compact-draggable-bar${isNarrow ? " compact-bar--narrow" : ""}"
       data-task-id="${task.id}"
-      title="${escapeAttr(task.description)} · ${formatDate(task.start)} - ${formatDate(task.end)}"
+      title="${escapeAttr(task.component)} | ${escapeAttr(task.description)}
+Status: ${escapeAttr(task.status || "No status")}
+Period: ${formatDate(task.start)} → ${formatDate(task.end)}
+Duration: ${daysBetween(task.start, task.end)}d"
       style="
         left:${left}px;
         top:${10 + laneIndex * 32}px;
@@ -1981,7 +2028,7 @@ function renderCompactBar(task, min, pxPerDay, laneIndex) {
         --bar-text:${meta.text};
       "
     >
-      ${escapeHtml(compactTaskLabel(task))}
+      ${isNarrow ? "" : escapeHtml(compactTaskLabel(task))}
     </div>
   `;
 }
@@ -2045,24 +2092,19 @@ function startResize(event) {
   document.body.classList.add("dragging");
 }
 function updateField(collection, id, field, value) {
-  commitState();
-  if (
-    collection === "tasks" &&
-    isTaskFieldLockedByDependency(id, field)
-  ) {
+  if (collection === "tasks" && isTaskFieldLockedByDependency(id, field)) {
     const dependency = getTaskPredecessorDependency(id);
-  
     const fieldName = field === "start" ? "Start" : "End";
-
-    showToast(`${fieldName} locked by ${dependency.type} dependency`, "warning")
+    showToast(`${fieldName} locked by ${dependency.type} dependency`, "warning");
     renderAll();
     return;
   }
   const item = state[collection].find((entry) => entry.id === id);
   if (!item) return;
+  commitStateDebounced();
   item[field] = ["progress", "level", "color"].includes(field) ? Number(value || 0) : value;
   saveState();
-  renderAll();
+  scheduleRender();
 }
 
 
@@ -2732,15 +2774,19 @@ $$(".compact-zoom").forEach((button) => {
 
 $$(".nav-tab").forEach((button) => {
   button.addEventListener("click", () => {
+    // Flush any pending debounced render so the new view is always up to date.
+    if (_renderDebounceTimer) {
+      clearTimeout(_renderDebounceTimer);
+      _renderDebounceTimer = null;
+    }
     $$(".nav-tab").forEach((tab) => tab.classList.remove("active"));
     $$(".view").forEach((view) => view.classList.remove("active"));
     button.classList.add("active");
 
     const viewId = `#${button.dataset.view}View`;
     const target = $(viewId);
-    if (target) {
-      target.classList.add("active");
-    }
+    if (target) target.classList.add("active");
+    renderAll();
   });
 });
 
@@ -2843,7 +2889,7 @@ $$(".nav-tab").forEach((button) => {
     renderAll();
   });
 
-  $("#addFreeMilestoneButton").addEventListener("click", () => {
+  $("#addFreeMilestoneButton")?.addEventListener("click", () => {
     commitState();
     state.freeMilestones.push({
       id: crypto.randomUUID(),
@@ -3212,7 +3258,17 @@ function renderTimeline() {
     
       const collapsed = isComponentCollapsed(currentComponent);
       const icon = collapsed ? "▶" : "▼";
-    
+
+      const componentMilestoneMarkers = state.milestones
+        .filter(m => m.component === currentComponent && m.start)
+        .map((m, idx) => {
+          const left = ((dateValue(m.start) - min) / dayMs) * pxPerDay;
+          const colors = ["#4a5aa6", "#243782", "#b87900", "#c74444"];
+          const color = colors[m.color] || colors[idx % colors.length];
+          return `<span class="marker draggable-milestone" data-milestone-id="${m.id}" data-milestone-type="project" title="${escapeAttr(m.name)}" style="left:${left}px;top:11px;--marker:${color}"></span>
+                  <span class="milestone-label" style="left:${left}px;top:-2px">${escapeHtml(m.name)}</span>`;
+        }).join("");
+
       rows.push(`
         <div
           class="task-label component collapsible-component"
@@ -3223,9 +3279,9 @@ function renderTimeline() {
         <div
           class="lane component collapsible-component"
           data-component="${escapeAttr(currentComponent)}"
-        ></div>
+        >${componentMilestoneMarkers}</div>
       `);
-    
+
       currentOffset += 38;
     }
 
@@ -3465,11 +3521,9 @@ function applyExportEnhancements(clone) {
     clone.prepend(title);
   }
 
-  // Modo Clean
-  if (document.getElementById("pngCleanMode")?.checked) {
-    clone.querySelectorAll(".compact-component-lane, .compact-weeks-row").forEach(el => {
-      el.style.backgroundImage = "none !important";
-    });
+  // Legenda
+  if (!document.getElementById("pngIncludeLegend")?.checked) {
+    clone.querySelectorAll("#compactLegend, .legend").forEach(el => el.remove());
   }
 
   // Melhorias visuais
