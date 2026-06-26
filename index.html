@@ -251,6 +251,25 @@
                 </label>
               </div>
             </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Janela de datas</p>
+              <div class="drawer-date-range">
+                <input type="date" id="presentationFrom" />
+                <span>até</span>
+                <input type="date" id="presentationTo" />
+              </div>
+              <button class="ghost-button sm" id="clearDateRange" style="margin-top:6px">
+                <i data-lucide="x"></i> Limpar datas
+              </button>
+            </div>
+            <div class="drawer-section">
+              <p class="drawer-section-label">Componentes visíveis</p>
+              <div class="drawer-comp-actions">
+                <button class="ghost-button sm" id="compSelectAll">Todos</button>
+                <button class="ghost-button sm" id="compSelectNone">Nenhum</button>
+              </div>
+              <div id="compCheckList" class="comp-check-list"></div>
+            </div>
           </div>
         </aside>
 

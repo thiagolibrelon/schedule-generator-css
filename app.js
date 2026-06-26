@@ -411,6 +411,9 @@ const zoomConfig = {
   }
 };
 let showDependencies = true;
+let presentationDateFrom = '';
+let presentationDateTo   = '';
+let hiddenComponents     = new Set();
 let collapsedComponents = {};
 let sortState = { field: null, dir: 'asc' };
 let selectedTaskIds = new Set();
@@ -2161,9 +2164,16 @@ function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, b
 }
 
 function renderCompactTimeline() {
-  const tasks = getFilteredTasks().sort(
-    (a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start)
-  );
+  const winFrom = presentationDateFrom ? new Date(presentationDateFrom + 'T00:00:00') : null;
+  const winTo   = presentationDateTo   ? new Date(presentationDateTo   + 'T00:00:00') : null;
+
+  let tasks = getFilteredTasks().filter(t => {
+    if (hiddenComponents.has(t.component)) return false;
+    if (winFrom && dateValue(t.end)   < winFrom) return false;
+    if (winTo   && dateValue(t.start) > winTo)   return false;
+    return true;
+  }).sort((a, b) => a.component.localeCompare(b.component) || dateValue(a.start) - dateValue(b.start));
+
   if (!tasks.length) {
     const ct = document.getElementById("compactTimeline");
     if (ct) ct.innerHTML = `
@@ -2179,7 +2189,9 @@ function renderCompactTimeline() {
     lucide.createIcons();
     return;
   }
-  const { min, max } = getRange(tasks.length ? tasks : state.tasks);
+  const autoRange = getRange(tasks.length ? tasks : state.tasks);
+  const min = winFrom && winFrom > autoRange.min ? winFrom : autoRange.min;
+  const max = winTo   && winTo   < autoRange.max ? winTo   : autoRange.max;
   const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
   const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
   const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
@@ -3342,7 +3354,19 @@ $$(".nav-tab").forEach((button) => {
   const layoutDrawer  = document.getElementById("layoutDrawer");
   const drawerOverlay = document.getElementById("layoutDrawerOverlay");
 
+  function renderCompCheckList() {
+    const list = document.getElementById('compCheckList');
+    if (!list) return;
+    const components = [...new Set(state.tasks.map(t => t.component))].sort();
+    list.innerHTML = components.map(c => `
+      <label class="comp-check-item">
+        <input type="checkbox" class="comp-check" data-comp="${escapeAttr(c)}"${!hiddenComponents.has(c) ? ' checked' : ''} />
+        <span>${escapeHtml(c)}</span>
+      </label>`).join('');
+  }
+
   function openLayoutDrawer() {
+    renderCompCheckList();
     layoutDrawer.classList.add("open");
     drawerOverlay.classList.add("open");
     document.body.style.overflow = "hidden";
@@ -3371,6 +3395,38 @@ $$(".nav-tab").forEach((button) => {
         main.dispatchEvent(new Event("change"));
       }
     });
+
+  // Filtros de apresentação
+  document.getElementById('presentationFrom')?.addEventListener('change', e => {
+    presentationDateFrom = e.target.value;
+    renderCompactTimeline(); lucide.createIcons();
+  });
+  document.getElementById('presentationTo')?.addEventListener('change', e => {
+    presentationDateTo = e.target.value;
+    renderCompactTimeline(); lucide.createIcons();
+  });
+  document.getElementById('compCheckList')?.addEventListener('change', e => {
+    if (!e.target.classList.contains('comp-check')) return;
+    const comp = e.target.dataset.comp;
+    if (e.target.checked) hiddenComponents.delete(comp);
+    else hiddenComponents.add(comp);
+    renderCompactTimeline(); lucide.createIcons();
+  });
+  document.getElementById('compSelectAll')?.addEventListener('click', () => {
+    hiddenComponents.clear();
+    renderCompCheckList(); renderCompactTimeline(); lucide.createIcons();
+  });
+  document.getElementById('compSelectNone')?.addEventListener('click', () => {
+    new Set(state.tasks.map(t => t.component)).forEach(c => hiddenComponents.add(c));
+    renderCompCheckList(); renderCompactTimeline(); lucide.createIcons();
+  });
+  document.getElementById('clearDateRange')?.addEventListener('click', () => {
+    presentationDateFrom = ''; presentationDateTo = '';
+    const f = document.getElementById('presentationFrom');
+    const t = document.getElementById('presentationTo');
+    if (f) f.value = ''; if (t) t.value = '';
+    renderCompactTimeline(); lucide.createIcons();
+  });
 
   // Fecha drawer com Escape
   document.addEventListener("keydown", (e) => {
