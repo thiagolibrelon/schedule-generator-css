@@ -2086,7 +2086,7 @@ function packCompactTasks(tasks) {
     for (const lane of lanes) {
       const last = lane[lane.length - 1];
 
-      if (dateValue(task.start) > dateValue(last.end)) {
+      if (dateValue(task.start) >= dateValue(last.end)) {
         lane.push(task);
         placed = true;
         break;
