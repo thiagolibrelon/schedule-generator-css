@@ -218,6 +218,8 @@ const zoomConfig = {
 };
 let showDependencies = true;
 let collapsedComponents = {};
+let sortState = { field: null, dir: 'asc' };
+let selectedTaskIds = new Set();
 const history = {
   undoStack: [],
   redoStack: [],
@@ -872,6 +874,76 @@ function getFilteredTasks() {
   });
 }
 
+function getSortedTasks(tasks) {
+  if (!sortState.field) return tasks;
+  return [...tasks].sort((a, b) => {
+    let va = a[sortState.field] ?? '';
+    let vb = b[sortState.field] ?? '';
+    if (typeof va === 'string') { va = va.toLowerCase(); vb = String(vb).toLowerCase(); }
+    if (va < vb) return sortState.dir === 'asc' ? -1 : 1;
+    if (va > vb) return sortState.dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+function recalculateStatuses() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const soonMs = today.getTime() + 14 * 86400000;
+  let changed = 0;
+  state.tasks.forEach(task => {
+    const pct = Math.round((task.progress ?? 0) * 100);
+    const fin = task.end ? new Date(task.end + 'T00:00:00') : null;
+    const prev = task.status;
+    if (pct >= 100) {
+      task.status = fin && fin < today ? "Concluded with a delay" : "Concluded";
+    } else if (fin && fin < today) {
+      task.status = "Delayed";
+    } else if (fin && fin.getTime() <= soonMs) {
+      task.status = "Attention point";
+    } else if (pct > 0) {
+      task.status = "On time";
+    }
+    if (task.status !== prev) changed++;
+  });
+  syncToActiveProject(); saveState(); renderAll();
+  showToast(`${changed} atividade${changed !== 1 ? 's' : ''} atualizada${changed !== 1 ? 's' : ''}`);
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById("bulkBar");
+  const count = document.getElementById("bulkCount");
+  if (!bar || !count) return;
+  const n = selectedTaskIds.size;
+  bar.style.display = n === 0 ? 'none' : 'flex';
+  count.textContent = `${n} selecionada${n !== 1 ? 's' : ''}`;
+}
+
+function applyBulkEdit() {
+  const status = document.getElementById("bulkStatus")?.value;
+  const progressRaw = document.getElementById("bulkProgress")?.value;
+  const progress = progressRaw !== "" ? parseFloat(progressRaw) / 100 : null;
+  if (!status && progress === null) return;
+  commitState();
+  state.tasks.forEach(task => {
+    if (!selectedTaskIds.has(task.id)) return;
+    if (status) task.status = status;
+    if (progress !== null && !isNaN(progress)) task.progress = Math.max(0, Math.min(1, progress));
+  });
+  selectedTaskIds.clear();
+  syncToActiveProject(); saveState(); renderAll();
+  showToast("Atualização em lote aplicada");
+}
+
+function bulkDeleteTasks() {
+  const n = selectedTaskIds.size;
+  if (!n) return;
+  if (!confirm(`Excluir ${n} atividade${n !== 1 ? 's' : ''}?`)) return;
+  commitState();
+  state.tasks = state.tasks.filter(t => !selectedTaskIds.has(t.id));
+  selectedTaskIds.clear();
+  syncToActiveProject(); saveState(); renderAll();
+}
+
 function getRange(tasks = state.tasks) {
   const dates = [
     ...tasks.flatMap((task) => [dateValue(task.start), dateValue(task.end), dateValue(task.milestoneDate)]),
@@ -1181,20 +1253,23 @@ function renderTeamView() {
 
 
 function renderFilters() {
+  const cf = document.getElementById("componentFilter");
+  if (!cf) return;
   const components = ["all", ...new Set(state.tasks.map((task) => task.component))];
-  const current = $("#componentFilter").value || "all";
-  $("#componentFilter").innerHTML = components
+  const current = cf.value || "all";
+  cf.innerHTML = components
     .map((item) => `<option value="${escapeHtml(item)}">${item === "all" ? "All components" : escapeHtml(item)}</option>`)
     .join("");
-  $("#componentFilter").value = components.includes(current) ? current : "all";
+  cf.value = components.includes(current) ? current : "all";
 }
 
 function renderLegend() {
   const statuses = ["On time", "Attention point", "Delayed", "Concluded", "Concluded with a delay"];
-  const html = $("#legendToggle").checked
+  const html = $("#legendToggle")?.checked
     ? statuses.map((status) => `<span class="legend-item"><span class="dot" style="--dot:${statusMeta[status].color}"></span>${status}</span>`).join("")
     : "";
-  $("#legend").innerHTML = html;
+  const legend = $("#legend");
+  if (legend) legend.innerHTML = html;
   const compactLegend = $("#compactLegend");
   if (compactLegend) compactLegend.innerHTML = html;
 }
@@ -1549,70 +1624,104 @@ function tableSelect(value, options, dataset) {
 
 function renderTasksTable() {
   const statuses = ["", "On time", "Attention point", "Delayed", "Concluded", "Concluded with a delay"];
+  const table = document.getElementById("tasksTable");
+  if (!table) return;
 
-  // ETAPA 8 — PATCH G: Criação da variável com tratamento de empty state
-  const taskRows = state.tasks.length
-    ? state.tasks
-        .map(
-          (task) => `<tr data-id="${task.id}">
-        <td>${tableInput(task.component, "text", 'data-field="component"')}</td>
-        <td>${tableInput(task.description, "text", 'data-field="description"')}</td>
-        <td>${tableInput(task.start, "date", 'data-field="start"')}</td>
-        <td>${tableInput(task.end, "date", 'data-field="end"')}</td>
-        <td>${tableSelect(task.status || "", statuses, 'data-field="status"')}</td>
-        <td>${tableInput(task.progress ?? 0, "number", 'min="0" max="1" step="0.05" data-field="progress"')}</td>
-        <td>${tableInput(task.milestone, "text", 'data-field="milestone"')}</td>
-        <td>${tableInput(task.milestoneDate, "date", 'data-field="milestoneDate"')}</td>
-        <td>${dependencySelect(task)}</td>
-        <td>${dependencyTypeSelect(task)}</td>
-        <td>${tableInput(task.level ?? 0, "number", 'min="0" max="10" data-field="level"')}</td>
-        <td><button class="row-action" data-delete-task="${task.id}" title="Delete">
-          <i data-lucide="trash-2"></i>
-        </button></td>
-      </tr>`,
-        )
-        .join("")
-    : `<tr><td colspan="12">
-        <div class="view-empty-state" style="text-align: center; padding: 20px;">
-          <i data-lucide="inbox"></i>
-          <p style="margin: 8px 0 4px 0; font-weight: bold;">Nenhuma atividade cadastrada</p>
-          <small style="color: #666;">Clique em "+ Activity" para começar.</small>
-        </div>
-      </td></tr>`;
+  if (!state.tasks.length) {
+    table.innerHTML = `<thead><tr><th colspan="10">
+      <div class="view-empty-state" style="text-align:center;padding:20px">
+        <i data-lucide="inbox"></i>
+        <p style="margin:8px 0 4px;font-weight:bold">Nenhuma atividade cadastrada</p>
+        <small style="color:#666">Clique em "+ Activity" para começar.</small>
+      </div></th></tr></thead><tbody></tbody>`;
+    return;
+  }
 
-  // Renderização final substituindo o innerHTML por .html() do jQuery
-const table = document.getElementById("tasksTable");
+  const si = document.getElementById("searchInput");
+  const cf = document.getElementById("componentFilter");
+  const sf = document.getElementById("statusFilter");
+  const hasFilter = (si?.value || "") !== "" ||
+    (cf?.value || "all") !== "all" ||
+    (sf?.value || "all") !== "all";
 
-if (!table) {
-  console.error("tasksTable não encontrada");
-  return;
-}
+  const filtered = getSortedTasks(getFilteredTasks());
 
-table.innerHTML = `
-  <thead>
-    <tr>
-      <th>Component</th>
-      <th>Description</th>
-      <th>Initial</th>
-      <th>Final</th>
-      <th>Status</th>
-      <th>%</th>
+  // Group by component preserving sort order
+  const grouped = new Map();
+  for (const task of filtered) {
+    if (!grouped.has(task.component)) grouped.set(task.component, []);
+    grouped.get(task.component).push(task);
+  }
+
+  const allSelected = filtered.length > 0 && filtered.every(t => selectedTaskIds.has(t.id));
+
+  const sortIcon = (field) => {
+    if (sortState.field !== field) return '<i data-lucide="chevrons-up-down" class="sort-icon"></i>';
+    return sortState.dir === 'asc'
+      ? '<i data-lucide="chevron-up" class="sort-icon active"></i>'
+      : '<i data-lucide="chevron-down" class="sort-icon active"></i>';
+  };
+
+  let bodyHtml = '';
+  if (filtered.length === 0) {
+    bodyHtml = `<tr><td colspan="10"><div class="view-empty-state" style="text-align:center;padding:20px">
+      <i data-lucide="search-x"></i><p>Nenhuma atividade encontrada</p>
+      <small>Ajuste os filtros para ver resultados.</small></div></td></tr>`;
+  } else {
+    for (const [component, tasks] of grouped.entries()) {
+      // undefined = collapsed (default); false = expanded; filter forces expand
+      const isCollapsed = !hasFilter && collapsedComponents[component] !== false;
+      const pct = Math.round(tasks.reduce((s, t) => s + (t.progress ?? 0), 0) / tasks.length * 100);
+      const delayed = tasks.filter(t => t.status === "Delayed").length;
+      const attention = tasks.filter(t => t.status === "Attention point").length;
+      const badge = delayed
+        ? `<span class="group-badge delayed">${delayed} delayed</span>`
+        : attention
+          ? `<span class="group-badge attention">${attention} attn</span>`
+          : '';
+
+      bodyHtml += `<tr class="group-header-row" data-group="${escapeAttr(component)}">
+        <td colspan="10"><div class="group-header-inner">
+          <i data-lucide="${isCollapsed ? 'chevron-right' : 'chevron-down'}" class="group-chevron" style="transition:transform .15s"></i>
+          <strong>${escapeHtml(component)}</strong>
+          <span class="group-meta">${tasks.length} atividade${tasks.length !== 1 ? 's' : ''} · ${pct}%</span>
+          ${badge}
+        </div></td></tr>`;
+
+      if (!isCollapsed) {
+        for (const task of tasks) {
+          const chk = selectedTaskIds.has(task.id);
+          bodyHtml += `<tr data-id="${task.id}"${chk ? ' class="row-selected"' : ''}>
+            <td class="col-check"><input type="checkbox" class="row-check" data-check-id="${task.id}"${chk ? ' checked' : ''} /></td>
+            <td>${tableInput(task.component, "text", 'data-field="component"')}</td>
+            <td>${tableInput(task.description, "text", 'data-field="description"')}</td>
+            <td>${tableInput(task.start, "date", 'data-field="start"')}</td>
+            <td>${tableInput(task.end, "date", 'data-field="end"')}</td>
+            <td>${tableSelect(task.status || "", statuses, 'data-field="status"')}</td>
+            <td>${tableInput(task.progress ?? 0, "number", 'min="0" max="1" step="0.05" data-field="progress"')}</td>
+            <td>${tableInput(task.milestone, "text", 'data-field="milestone"')}</td>
+            <td>${tableInput(task.milestoneDate, "date", 'data-field="milestoneDate"')}</td>
+            <td><button class="row-action" data-delete-task="${task.id}" title="Delete"><i data-lucide="trash-2"></i></button></td>
+          </tr>`;
+        }
+      }
+    }
+  }
+
+  table.innerHTML = `
+    <thead><tr>
+      <th class="col-check"><input type="checkbox" id="selectAllCheck"${allSelected ? ' checked' : ''} title="Selecionar tudo" /></th>
+      <th class="sortable" data-sort="component">Component ${sortIcon('component')}</th>
+      <th class="sortable" data-sort="description">Description ${sortIcon('description')}</th>
+      <th class="sortable" data-sort="start">Initial ${sortIcon('start')}</th>
+      <th class="sortable" data-sort="end">Final ${sortIcon('end')}</th>
+      <th class="sortable" data-sort="status">Status ${sortIcon('status')}</th>
+      <th class="sortable" data-sort="progress">% ${sortIcon('progress')}</th>
       <th>Milestone</th>
       <th>Date</th>
-      <th>Predecessor</th>
-      <th>Dependency</th>
-      <th>Level</th>
       <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    ${taskRows}
-  </tbody>
-`;
-
-  // DICA: Se os seus ícones do Lucide (trash-2 e inbox) sumirem ao renderizar, 
-  // descomente a linha abaixo para forçar o Lucide a recarregá-los na tela:
-  // if (typeof lucide !== 'undefined') lucide.createIcons();
+    </tr></thead>
+    <tbody>${bodyHtml}</tbody>`;
 }
 
 function renderMilestoneTables() {
@@ -1812,9 +1921,14 @@ function renderCompactYearRow(min, max, pxPerDay, timelineWidth) {
 
 const projectMilestoneColors = ["#4a5aa6", "#147c73", "#b87900", "#c74444"];
 
-function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight) {
+function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight, todayOffsetPx) {
   const items = state.milestones.filter(m => m.start && !m.component);
-  if (!items.length) return "";
+  const todayLine = (todayOffsetPx >= 0 && todayOffsetPx <= timelineWidth)
+    ? `<div class="today-line-ms" style="left:${todayOffsetPx}px;height:${24 + bodyHeight}px">
+         <span class="today-label">hoje</span>
+       </div>`
+    : '';
+  if (!items.length && !todayLine) return "";
 
   const markers = items.map((item, index) => {
     const color = projectMilestoneColors[item.color] || projectMilestoneColors[index % projectMilestoneColors.length];
@@ -1848,6 +1962,7 @@ function renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, b
     <div class="compact-milestones-lane" style="width:${timelineWidth}px">
       ${monthBands}
       ${markers}
+      ${todayLine}
     </div>`;
 }
 
@@ -1874,6 +1989,8 @@ function renderCompactTimeline() {
   const totalDays = Math.max(1, Math.round((max - min) / dayMs) + 1);
   const pxPerDay = zoomConfig[compactZoom].pxPerDay * compactMonthScale;
   const timelineWidth = Math.max(680, Math.round(totalDays * pxPerDay));
+  const todayRaw = new Date(); todayRaw.setHours(0, 0, 0, 0);
+  const todayOffsetPx = Math.round((todayRaw.getTime() - min.getTime()) / dayMs * pxPerDay);
   const months = getMonths(min, max);
 
   const weeksHeader = renderCompactWeeksHeader(min, max, pxPerDay, timelineWidth);
@@ -1925,7 +2042,7 @@ function renderCompactTimeline() {
   }
 
   const yearRow        = renderCompactYearRow(min, max, pxPerDay, timelineWidth);
-  const milestonesLane = renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight);
+  const milestonesLane = renderCompactMilestonesLane(min, pxPerDay, timelineWidth, monthBands, bodyHeight, todayOffsetPx);
 
   const compactTitle = document.getElementById("compactProjectTitle");
   const compactPeriod = document.getElementById("compactPeriodLabel");
@@ -2034,24 +2151,30 @@ Duration: ${daysBetween(task.start, task.end)}d"
 }
 
 function renderAll() {
-  $("#projectName").value = state.projectName;
+  // Elementos sempre visíveis (topbar + sidebar)
+  const pnEl = document.getElementById("projectName");
+  if (pnEl) pnEl.value = state.projectName;
   $("#pageTitle").textContent = state.projectName || "Schedule Generator";
   renderFilters();
-  renderDashboard();
-  renderTeamView();
-  renderSettingsView();  
   renderLegend();
   renderBaselineSelector();
   renderProjectSelector();
-  refreshTimelineInteractions();
-  renderCompactTimeline();
-  renderTasksTable();
-  renderMilestoneTables();
   renderAlerts();
+
+  // Só renderiza a view que está na tela
+  const viewId = document.querySelector(".view.active")?.id || "dashboardView";
+  if (viewId === "dashboardView")   renderDashboard();
+  if (viewId === "compactView")     renderCompactTimeline();
+  if (viewId === "activitiesView")  { renderTasksTable(); updateBulkBar(); }
+  if (viewId === "milestonesView")  renderMilestoneTables();
+  if (viewId === "settingsView")    renderSettingsView();
+  if (viewId !== "activitiesView")  { const bb = document.getElementById("bulkBar"); if (bb) bb.style.display = 'none'; }
+
+  // Sidebar-toggles (Weeks/Legend/Baseline) só faz sentido na Timeline
+  const sidebarToggles = document.querySelector(".sidebar-toggles");
+  if (sidebarToggles) sidebarToggles.style.display = viewId === "compactView" ? "" : "none";
+
   lucide.createIcons();
-  initTaskDragging();
-  initTaskResize();
-  initMilestoneDragging();
 }
 function initTaskResize() {
   document
@@ -2736,9 +2859,8 @@ $$(".compact-zoom").forEach((button) => {
     captureBaseline
   );
 
-  $("#dependenciesToggle").addEventListener("change", (event) => {
+  document.getElementById("dependenciesToggle")?.addEventListener("change", (event) => {
     showDependencies = event.target.checked;
-    refreshTimelineInteractions();
   });
 
   document.addEventListener("mousedown", (event) => {
@@ -2797,7 +2919,7 @@ $$(".nav-tab").forEach((button) => {
   });
 
   ["searchInput", "componentFilter", "statusFilter", "legendToggle"].forEach((id) => {
-    $(`#${id}`).addEventListener("input", renderAll);
+    document.getElementById(id)?.addEventListener("input", renderAll);
   });
 
   $$(".segmented[data-zoom]").forEach((button) => {
@@ -2817,6 +2939,28 @@ $$(".nav-tab").forEach((button) => {
   
 
   document.addEventListener("change", (event) => {
+    // Row checkbox
+    if (event.target.classList.contains("row-check")) {
+      const id = event.target.dataset.checkId;
+      if (event.target.checked) selectedTaskIds.add(id);
+      else selectedTaskIds.delete(id);
+      const row = event.target.closest("tr[data-id]");
+      if (row) row.classList.toggle("row-selected", event.target.checked);
+      updateBulkBar();
+      return;
+    }
+
+    // Select-all checkbox
+    if (event.target.id === "selectAllCheck") {
+      const vis = getFilteredTasks();
+      if (event.target.checked) vis.forEach(t => selectedTaskIds.add(t.id));
+      else selectedTaskIds.clear();
+      updateBulkBar();
+      renderTasksTable();
+      lucide.createIcons();
+      return;
+    }
+
     if (event.target.dataset.dependencyPredecessor) {
       updateDependencyPredecessor(
         event.target.dataset.dependencyPredecessor,
@@ -2850,6 +2994,35 @@ $$(".nav-tab").forEach((button) => {
   });
 
   document.addEventListener("click", (event) => {
+    // Group header toggle (undefined = collapsed by default; false = explicitly expanded)
+    const groupRow = event.target.closest(".group-header-row");
+    if (groupRow) {
+      const comp = groupRow.dataset.group;
+      if (collapsedComponents[comp] === false) {
+        delete collapsedComponents[comp]; // collapse (back to default)
+      } else {
+        collapsedComponents[comp] = false; // expand explicitly
+      }
+      renderTasksTable();
+      lucide.createIcons();
+      return;
+    }
+
+    // Sortable column header
+    const sortTh = event.target.closest(".sortable");
+    if (sortTh) {
+      const field = sortTh.dataset.sort;
+      if (sortState.field === field) {
+        sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortState.field = field;
+        sortState.dir = 'asc';
+      }
+      renderTasksTable();
+      lucide.createIcons();
+      return;
+    }
+
     const deleteTask = event.target.closest("[data-delete-task]");
     const deleteMs = event.target.closest("[data-delete-ms]");
     const deleteFree = event.target.closest("[data-delete-free]");
@@ -2903,7 +3076,26 @@ $$(".nav-tab").forEach((button) => {
     renderAll();
   });
 
+  document.getElementById("recalcStatusButton")?.addEventListener("click", recalculateStatuses);
+  document.getElementById("bulkApply")?.addEventListener("click", applyBulkEdit);
+  document.getElementById("bulkDelete")?.addEventListener("click", bulkDeleteTasks);
+  document.getElementById("bulkClear")?.addEventListener("click", () => {
+    selectedTaskIds.clear();
+    updateBulkBar();
+    renderTasksTable();
+    lucide.createIcons();
+  });
+
   $("#importJsonButton").addEventListener("click", () => $("#importJsonInput").click());
+  $("#importExcelButton").addEventListener("click", () => $("#importExcelInput").click());
+  $("#exportExcelButton")?.addEventListener("click", exportExcelProject);
+  $("#importExcelInput").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await importExcelProject(file);
+    event.target.value = "";
+  });
+
  $("#importJsonInput").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -3688,6 +3880,208 @@ function fitToPptSlide() {
 
 // mantém fallbackColor como alias para não quebrar nada
 const fallbackColor = resolveColor;
+
+// ── Importação Excel ────────────────────────────────────────────────────────
+
+function formatDateDMY(isoDate) {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function exportExcelProject() {
+  const wb = XLSX.utils.book_new();
+
+  // ── Input Timeline ──────────────────────────────────────────
+  const timelineRows = [
+    [state.projectName || 'Projeto'],
+    ['Component', 'Description', 'Initial Date', 'Final Date', 'Status', 'Status %',
+     'Milestone Individual', 'Milestone Date', 'Milestone Status', 'Level'],
+    ...state.tasks.map(t => [
+      t.component, t.description,
+      formatDateDMY(t.start), formatDateDMY(t.end),
+      t.status || '',
+      `${Math.round((t.progress || 0) * 100)}%`,
+      t.milestone || '',
+      formatDateDMY(t.milestoneDate),
+      t.milestoneStatus || '',
+      t.level ?? 0,
+    ]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(timelineRows), 'Input Timeline');
+
+  // ── Input Milestone ─────────────────────────────────────────
+  const msRows = [
+    ['Milestone', 'Type', 'Initial Date', 'Final Date', 'Level', 'Color Milestone'],
+    ...state.milestones.map(m => [
+      m.name, m.type,
+      formatDateDMY(m.start), formatDateDMY(m.end),
+      m.level ?? 0, m.color ?? 0,
+    ]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(msRows), 'Input Milestone');
+
+  // ── Input Milestone Livre ───────────────────────────────────
+  const freeRows = [
+    ['Milestone', 'Color', 'Initial Date', 'Componente', 'Nivel'],
+    ...state.freeMilestones.map(fm => [
+      fm.name, fm.status,
+      formatDateDMY(fm.date),
+      fm.component, fm.level ?? 0,
+    ]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(freeRows), 'Input Milestone Livre');
+
+  const fileName = `${(state.projectName || 'schedule').replace(/[^a-z0-9]/gi, '_')}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  showToast(`Excel exportado: ${fileName}`);
+}
+
+function parseBrDate(value) {
+  if (!value) return '';
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return '';
+    const y = value.getUTCFullYear();
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(value.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(value).trim();
+  const match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match) return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  return '';
+}
+
+async function importExcelProject(file) {
+  try {
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type: 'array', cellDates: true });
+
+    // ── Input Timeline → tasks ──────────────────────────────────
+    const sheetTimeline = wb.Sheets['Input Timeline'];
+    if (!sheetTimeline) throw new Error('Aba "Input Timeline" não encontrada no arquivo.');
+
+    const timelineRows = XLSX.utils.sheet_to_json(sheetTimeline, { header: 1, defval: '' });
+
+    // Linha 0 (row 1 no Excel) = nome do projeto
+    const projectName = String(timelineRows[0]?.[0] || 'Projeto Importado').trim();
+
+    // Linha 1 = cabeçalhos — ignorar; linhas 2+ = dados
+    const tasks = [];
+    for (let i = 2; i < timelineRows.length; i++) {
+      const row = timelineRows[i];
+      const component   = String(row[0] || '').trim();
+      const description = String(row[1] || '').trim();
+      if (!component || !description) continue; // linha separadora ou vazia
+
+      const start = parseBrDate(row[2]);
+      const end   = parseBrDate(row[3]);
+      if (!start || !end) continue;
+
+      const status      = String(row[4] || '').trim();
+      const progressVal = row[5];
+      const progress    = Math.max(0, Math.min(1,
+        typeof progressVal === 'number'
+          ? (progressVal <= 1 ? progressVal : progressVal / 100)
+          : (parseFloat(String(progressVal || '0').replace('%', '')) || 0) / 100
+      ));
+      const milestone       = String(row[6] || '').trim();
+      const milestoneDate   = parseBrDate(row[7]);
+      const milestoneStatus = String(row[8] || '').trim();
+      const level           = parseInt(row[13] || 0, 10) || 0;
+
+      tasks.push({
+        id: crypto.randomUUID(),
+        index: tasks.length + 1,
+        component,
+        description,
+        start,
+        end,
+        status,
+        progress,
+        milestone,
+        milestoneDate,
+        milestoneStatus,
+        level,
+        baselines: [{ id: 'v1', start, end }],
+      });
+    }
+
+    // ── Input Milestone → milestones ────────────────────────────
+    const milestones = [];
+    const sheetMs = wb.Sheets['Input Milestone'];
+    if (sheetMs) {
+      const msRows = XLSX.utils.sheet_to_json(sheetMs, { header: 1, defval: '' });
+      for (let i = 1; i < msRows.length; i++) {
+        const row  = msRows[i];
+        const name = String(row[0] || '').trim();
+        if (!name) continue;
+        milestones.push({
+          id:          crypto.randomUUID(),
+          name,
+          type:        String(row[1] || 'Milestone').trim() || 'Milestone',
+          start:       parseBrDate(row[2]) || '',
+          end:         parseBrDate(row[3]) || '',
+          level:       parseInt(row[4] || 0, 10) || 0,
+          color:       parseInt(row[5] || 0, 10) || 0,
+          component:   '',
+          description: '',
+        });
+      }
+    }
+
+    // ── Input Milestone Livre → freeMilestones ──────────────────
+    const freeMilestones = [];
+    const sheetFree = wb.Sheets['Input Milestone Livre'];
+    if (sheetFree) {
+      const freeRows = XLSX.utils.sheet_to_json(sheetFree, { header: 1, defval: '' });
+      for (let i = 1; i < freeRows.length; i++) {
+        const row  = freeRows[i];
+        const name = String(row[0] || '').trim();
+        const date = parseBrDate(row[2]);
+        if (!name || !date) continue;
+        freeMilestones.push({
+          id:        crypto.randomUUID(),
+          name,
+          status:    String(row[1] || '').trim(),
+          date,
+          component: String(row[3] || '').trim(),
+          level:     parseInt(row[4] || 0, 10) || 0,
+        });
+      }
+    }
+
+    // ── Cria novo projeto e ativa ───────────────────────────────
+    commitState();
+    syncToActiveProject();
+
+    const newId = crypto.randomUUID();
+    state.projects.push({
+      id:            newId,
+      name:          projectName,
+      client:        '',
+      manager:       '',
+      startDate:     '',
+      endDate:       '',
+      status:        'Active',
+      createdAt:     iso(new Date()),
+      team:          [],
+      tasks,
+      milestones,
+      freeMilestones,
+      dependencies:  [],
+    });
+
+    state.activeProjectId = newId;
+    syncFromActiveProject();
+    saveState();
+    renderAll();
+    showToast(`"${projectName}" importado — ${tasks.length} atividades`);
+  } catch (err) {
+    showToast(`Erro ao importar: ${err.message}`, 'error');
+    console.error(err);
+  }
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
