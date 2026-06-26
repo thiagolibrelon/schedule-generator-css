@@ -1619,7 +1619,7 @@ tr:hover .project-row-actions { opacity: 1; }
   top: 0;
   right: 0;
   height: 100vh;
-  width: 300px;
+  width: 360px;
   background: var(--panel);
   border-left: 1px solid var(--line);
   box-shadow: -8px 0 32px rgba(32, 33, 36, 0.12);
@@ -2314,8 +2314,11 @@ tr:hover .project-row-actions { opacity: 1; }
   align-items: flex-start;
   gap: 8px;
   font-size: 12px;
+  font-weight: 400;
+  text-transform: none;
+  color: var(--ink);
   cursor: pointer;
   padding: 3px 0;
   line-height: 1.3;
 }
-.comp-check-item input { flex-shrink: 0; margin-top: 2px; cursor: pointer; accent-color: var(--primary, #4a5aa6); }
+.comp-check-item input { flex-shrink: 0; width: auto; min-height: auto; margin-top: 2px; cursor: pointer; accent-color: var(--primary, #4a5aa6); }
